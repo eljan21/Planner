@@ -16,4 +16,4 @@ services:
       - key: ALLOWED_EMAILS
         sync: false          # e.g. dostun@gmail.com — leave empty to allow any Gmail
       - key: ALLOW_DEMO_LOGIN
-        value: "false"       # "true" shows a no-Google demo button (anyone can use it)
+        value: "true"        # preview: no-Google demo button (anyone with the link can use it) — set "false" once Google sign-in works

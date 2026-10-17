@@ -84,7 +84,7 @@ export default function Login({ config, appName, onLogin, theme, onToggleTheme }
         <p className="muted">Davam etmək üçün Gmail hesabınla daxil ol.</p>
         {config?.googleClientId
           ? <div className="google-btn" ref={btnRef} />
-          : !config?.devLogin && <p className="error">GOOGLE_CLIENT_ID təyin edilməyib (.env faylına baxın).</p>}
+          : !config?.devLogin && <p className="error">Google ilə giriş hələ qurulmayıb.</p>}
         {config?.devLogin && (
           <button className="btn btn-block" onClick={devLogin}>Demo giriş (sınaq üçün)</button>
         )}
