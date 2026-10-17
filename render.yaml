@@ -1,0 +1,19 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Free plan: no persistent disk, so the SQLite data is wiped whenever the service restarts or redeploys.
+services:
+  - type: web
+    name: khayas-planner
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GOOGLE_CLIENT_ID
+        sync: false          # asked for in the Render dashboard
+      - key: ALLOWED_EMAILS
+        sync: false          # e.g. dostun@gmail.com — leave empty to allow any Gmail
+      - key: ALLOW_DEMO_LOGIN
+        value: "false"       # "true" shows a no-Google demo button (anyone can use it)
