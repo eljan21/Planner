@@ -7,7 +7,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PALETTE, db, ensureCategories, tx } from './db.js';
 import { buildReport } from './report.js';
+import { LANGS, langOf, requestLang, tr } from './lang.js';
 import { addDaysKey, keyOf, occurrences } from './recur.js';
+import { CHARACTERS, linkUrl, notify, sendTest, startReminders, startTelegram, telegramEnabled, getBotUsername, unlink } from './telegram.js';
+import { hasPush, removeSubscription, saveSubscription, sendPush, vapidPublicKey } from './push.js';
+import { avatarOf, mountSocial } from './social.js';
+import { mountPasswordAuth } from './password.js';
 
 const PROD = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT) || 3000;
@@ -16,7 +21,8 @@ const JWT_SECRET = process.env.JWT_SECRET || (PROD ? '' : 'dev-only-secret');
 // Demo sign-in (no Google): always available locally with DEV_LOGIN=true; in production only when
 // ALLOW_DEMO_LOGIN=true is set explicitly (e.g. a throw-away preview) — anyone can then sign in as "demo".
 const DEV_LOGIN = (!PROD && process.env.DEV_LOGIN === 'true') || process.env.ALLOW_DEMO_LOGIN === 'true';
-const APP_NAME = (process.env.APP_NAME || "Khaya's Planner").slice(0, 40);
+const APP_NAME = (process.env.APP_NAME || 'Plan it!').slice(0, 40);
+const OLD_APP_NAMES = new Set(["Khaya's Planner", "Khayala's Planner"]); // earlier defaults — saved settings still carry them
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '')
   .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
@@ -34,7 +40,9 @@ const google = new OAuth2Client(GOOGLE_CLIENT_ID);
 const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
-app.use(express.json({ limit: '100kb' }));
+const jsonSmall = express.json({ limit: '100kb' });
+const jsonAvatar = express.json({ limit: '600kb' }); // profile pictures arrive as data URLs
+app.use((req, res, next) => (req.path === '/api/me/avatar' ? jsonAvatar : jsonSmall)(req, res, next));
 app.use(cookieParser());
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
@@ -68,11 +76,12 @@ function auth(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  ensureCategories(req.user.id);
+  req.lang = requestLang(req);
+  ensureCategories(req.user.id, req.lang);
   next();
 }
 
-const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, picture: u.picture });
+const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name, picture: avatarOf(u) });
 
 // ---------- per-user settings ----------
 const ACCENTS = ['lime', 'violet', 'sky', 'peach', 'mint', 'rose', 'sun'];
@@ -86,6 +95,18 @@ const DEFAULT_SETTINGS = {
   density: 'comfortable',   // comfortable | compact
   sort: 'manual',           // manual | time | priority
   dayColors: [...PASTELS],  // header colour per weekday, Monday first
+  anim: 'full',             // character animations: full | calm | off
+  sound: false,             // applause when the whole day is done
+  tz: 'Asia/Baku',          // IANA time zone, for the times in Telegram messages
+  name: '',                 // what the user asked to be called
+  crew: null,               // character ids keeping the user company; null = everyone
+  onboarded: false,         // first-sign-in questions answered
+  lang: 'en',               // interface language: en | az
+};
+
+const validTz = (tz) => {
+  if (typeof tz !== 'string' || tz.length > 60) return false;
+  try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; }
 };
 
 function cleanSettings(input = {}) {
@@ -102,13 +123,25 @@ function cleanSettings(input = {}) {
   if (Array.isArray(input.dayColors) && input.dayColors.length === 7 && input.dayColors.every((c) => PASTELS.includes(c))) {
     out.dayColors = input.dayColors;
   }
+  if (['full', 'calm', 'off'].includes(input.anim)) out.anim = input.anim;
+  if (typeof input.sound === 'boolean') out.sound = input.sound;
+  if (validTz(input.tz)) out.tz = input.tz;
+  if (typeof input.name === 'string' && input.name.trim()) out.name = input.name.trim().slice(0, 24);
+  if (Array.isArray(input.crew)) {
+    const crew = CHARACTERS.filter((id) => input.crew.includes(id));
+    if (crew.length) out.crew = crew;
+  }
+  if (typeof input.onboarded === 'boolean') out.onboarded = input.onboarded;
+  if (LANGS.includes(input.lang)) out.lang = input.lang;
   return out;
 }
 
 const settingsOf = (u) => {
   let saved = {};
   try { saved = JSON.parse(u.settings || '{}'); } catch { /* ignore */ }
-  return { ...DEFAULT_SETTINGS, ...cleanSettings(saved) };
+  const s = { ...DEFAULT_SETTINGS, ...cleanSettings(saved) };
+  if (OLD_APP_NAMES.has(s.appName)) s.appName = s.name ? `${s.name}'s Planner` : APP_NAME;
+  return s;
 };
 
 function upsertUser({ sub, email, name, picture }) {
@@ -142,14 +175,25 @@ app.post('/api/auth/google', async (req, res) => {
   if (ALLOWED_EMAILS.length && !ALLOWED_EMAILS.includes(email)) {
     return res.status(403).json({ error: 'not_allowed' });
   }
+  // the same address signed up with a password earlier: Google has verified it, so it's the same person
+  if (!db.prepare('SELECT 1 FROM users WHERE google_sub = ?').get(payload.sub)) {
+    db.prepare("UPDATE users SET google_sub = ? WHERE lower(email) = ? AND google_sub LIKE 'local:%'").run(payload.sub, email);
+  }
   const user = upsertUser({ sub: payload.sub, email, name: payload.name || email, picture: payload.picture || '' });
   setSession(res, user.id);
   res.json({ user: publicUser(user), settings: settingsOf(user) });
 });
 
 if (DEV_LOGIN) {
+  // `n` picks one of a few demo accounts, so friendships can be tried out locally
+  const DEMOS = [
+    { sub: 'dev-user', email: 'demo@example.com', name: 'Demo İstifadəçi' },
+    { sub: 'dev-user-2', email: 'dost@example.com', name: 'Dost Demo' },
+    { sub: 'dev-user-3', email: 'uchuncu@example.com', name: 'Üçüncü Demo' },
+  ];
   app.post('/api/auth/dev', (req, res) => {
-    const user = upsertUser({ sub: 'dev-user', email: 'demo@example.com', name: 'Demo İstifadəçi', picture: '' });
+    const demo = DEMOS[Math.min(Math.max(Number(req.body?.n) || 1, 1), DEMOS.length) - 1];
+    const user = upsertUser({ ...demo, picture: '' });
     setSession(res, user.id);
     res.json({ user: publicUser(user), settings: settingsOf(user) });
   });
@@ -189,6 +233,20 @@ const cleanPriority = (p) => {
   if (!Number.isInteger(n) || n < 0 || n > 3) throw new Error('priority');
   return n;
 };
+const cleanInstant = (v) => {
+  if (v === null || v === '') return null;
+  const t = Date.parse(v);
+  if (typeof v !== 'string' || Number.isNaN(t)) throw new Error('instant');
+  return new Date(t).toISOString();
+};
+/** reminder times from the client; ones that were already sent keep their flag */
+function cleanReminders(list, previous = '[]') {
+  if (!Array.isArray(list)) throw new Error('reminders');
+  const sent = new Set(parseJson(previous, []).filter((r) => r.sent).map((r) => r.at));
+  const ats = [...new Set(list.slice(0, 10).map((r) => cleanInstant(typeof r === 'string' ? r : r?.at)).filter(Boolean))].sort();
+  return JSON.stringify(ats.map((at) => ({ at, sent: sent.has(at) })));
+}
+
 const toTask = (r) => ({
   id: Number(r.id),
   title: r.title,
@@ -200,6 +258,8 @@ const toTask = (r) => ({
   priority: Number(r.priority) || 0,
   subtasks: parseJson(r.subtasks, []),
   recurId: r.recur_id == null ? null : Number(r.recur_id),
+  deadline: r.deadline || null,
+  reminders: parseJson(r.reminders, []),
   done: !!r.done,
   doneAt: r.done_at,
   createdAt: r.created_at,
@@ -210,7 +270,7 @@ const ownCategory = (id, uid) =>
 const firstCategory = (uid) =>
   db.prepare('SELECT id FROM categories WHERE user_id = ? ORDER BY position, id LIMIT 1').get(uid)?.id;
 
-function clean(body = {}, partial, uid) {
+function clean(body = {}, partial, uid, previous) {
   const out = {};
   if (!partial || 'title' in body) {
     const title = String(body.title ?? '').trim().slice(0, 200);
@@ -230,6 +290,8 @@ function clean(body = {}, partial, uid) {
   if ('time' in body) out.time = cleanTime(body.time);
   if ('priority' in body) out.priority = cleanPriority(body.priority);
   if ('subtasks' in body) out.subtasks = cleanSubtasks(body.subtasks);
+  if ('deadline' in body) out.deadline = cleanInstant(body.deadline);
+  if ('reminders' in body) out.reminders = cleanReminders(body.reminders, previous?.reminders);
   if ('done' in body) out.done = body.done ? 1 : 0;
   if ('position' in body && Number.isFinite(body.position)) out.position = body.position;
   return out;
@@ -273,10 +335,10 @@ app.post('/api/tasks', auth, (req, res) => {
   let d;
   const uid = req.user.id;
   try { d = clean(req.body, false, uid); } catch { return res.status(400).json({ error: 'invalid' }); }
-  const r = db.prepare(`INSERT INTO tasks (user_id, title, note, date, position, category_id, time, priority, subtasks)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+  const r = db.prepare(`INSERT INTO tasks (user_id, title, note, date, position, category_id, time, priority, subtasks, deadline, reminders)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(uid, d.title, d.note ?? '', d.date, nextPos(uid, d.date), d.category_id ?? firstCategory(uid),
-      d.time ?? null, d.priority ?? 0, d.subtasks ?? '[]');
+      d.time ?? null, d.priority ?? 0, d.subtasks ?? '[]', d.deadline ?? null, d.reminders ?? '[]');
   res.status(201).json(toTask(getTask(r.lastInsertRowid, uid)));
 });
 
@@ -307,7 +369,7 @@ app.patch('/api/tasks/:id', auth, (req, res) => {
   const task = getTask(Number(req.params.id), uid);
   if (!task) return res.status(404).json({ error: 'not_found' });
   let d;
-  try { d = clean(req.body, true, uid); } catch { return res.status(400).json({ error: 'invalid' }); }
+  try { d = clean(req.body, true, uid, task); } catch { return res.status(400).json({ error: 'invalid' }); }
 
   if (d.date && d.date !== task.date && !('position' in d)) d.position = nextPos(uid, d.date);
   if ('done' in d) {
@@ -325,6 +387,64 @@ app.patch('/api/tasks/:id', auth, (req, res) => {
 app.delete('/api/tasks/:id', auth, (req, res) => {
   db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(Number(req.params.id), req.user.id);
   res.json({ ok: true });
+});
+
+// ---------- email + password sign-in with authenticator codes ----------
+mountPasswordAuth(app, {
+  auth, secret: JWT_SECRET, prod: PROD, allowedEmails: ALLOWED_EMAILS, setSession, publicUser, settingsOf,
+});
+
+// ---------- notifications: Telegram (if linked) and the phone (if enabled) ----------
+// title and body may be [az, en] pairs — the recipient's language picks one
+const notifyUser = (uid, msg) => {
+  const lang = langOf(db.prepare('SELECT settings FROM users WHERE id = ?').get(uid));
+  const pick = (v) => (Array.isArray(v) ? tr(lang, ...v) : v);
+  const title = pick(msg.title);
+  const body = pick(msg.body);
+  const { url } = msg;
+  notify(uid, `${title}\n${body}`);
+  sendPush(uid, { title, body, url }).catch((e) => console.error('push:', e.message));
+};
+
+app.get('/api/push/key', (req, res) => res.json({ key: vapidPublicKey }));
+app.post('/api/push/subscribe', auth, (req, res) => {
+  try { saveSubscription(req.user.id, req.body?.subscription); res.json({ ok: true }); } catch { res.status(400).json({ error: 'invalid' }); }
+});
+app.delete('/api/push/subscribe', auth, (req, res) => { removeSubscription(req.user.id, req.body?.endpoint); res.json({ ok: true }); });
+app.post('/api/push/test', auth, async (req, res) => {
+  if (!hasPush(req.user.id)) return res.status(409).json({ error: 'not_subscribed' });
+  await sendPush(req.user.id, {
+    title: tr(req.lang, '✅ Bildirişlər işləyir', '✅ Notifications work'),
+    body: tr(req.lang, 'Deadline xatırlatmaları və dostluq xəbərləri bura gələcək.', 'Deadline reminders and friend news will show up here.'),
+    url: '/',
+  });
+  res.json({ ok: true });
+});
+
+// ---------- friends, streaks, profile pictures ----------
+mountSocial(app, auth, { notify: notifyUser });
+
+// ---------- Telegram ----------
+app.get('/api/telegram', auth, async (req, res) => {
+  let bot = null;
+  if (telegramEnabled) bot = await getBotUsername().catch(() => null);
+  res.json({ enabled: telegramEnabled, bot, linked: !!req.user.telegram_chat_id });
+});
+
+app.post('/api/telegram/link', auth, async (req, res) => {
+  if (!telegramEnabled) return res.status(503).json({ error: 'disabled' });
+  try { res.json({ url: await linkUrl(req.user.id) }); } catch { res.status(502).json({ error: 'telegram' }); }
+});
+
+app.delete('/api/telegram', auth, (req, res) => {
+  unlink(req.user.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/telegram/test', auth, async (req, res) => {
+  try { await sendTest(req.user.id); res.json({ ok: true }); } catch (e) {
+    res.status(e.message === 'not_linked' ? 409 : 502).json({ error: e.message });
+  }
 });
 
 // ---------- recurring tasks ----------
@@ -551,10 +671,13 @@ app.post('/api/notes/:id/task', auth, (req, res) => {
 });
 
 // ---------- reports (Excel) ----------
-const MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'İyun', 'İyul', 'Avqust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'];
-const human = (key) => {
+const MONTHS = {
+  az: ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'İyun', 'İyul', 'Avqust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'],
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+};
+const humanIn = (lang) => (key) => {
   const [y, m, d] = key.split('-').map(Number);
-  return `${d} ${MONTHS[m - 1]} ${y}`;
+  return `${d} ${MONTHS[lang][m - 1]} ${y}`;
 };
 
 const REPORT_SELECT = `
@@ -574,22 +697,25 @@ app.get('/api/reports/export', auth, async (req, res) => {
   if (!DATE_RE.test(today || '')) return res.status(400).json({ error: 'invalid' });
 
   const uid = req.user.id;
+  const lang = LANGS.includes(req.query.lang) ? req.query.lang : req.lang;
+  const L = (az, en) => tr(lang, az, en);
+  const human = humanIn(lang);
   const spanOf = (rows, empty) => (rows.length ? `${human(rows[0].date)} – ${human(rows[rows.length - 1].date)}` : empty);
   const ORDER = ' ORDER BY t.date, t.done, t.position';
   let rows, title, period, filename;
   if (scope === 'week') {
     if (!DATE_RE.test(from || '') || !DATE_RE.test(to || '')) return res.status(400).json({ error: 'invalid' });
     rows = db.prepare(`${REPORT_SELECT} AND t.date BETWEEN ? AND ?${ORDER}`).all(uid, from, to);
-    title = 'Həftəlik hesabat';
+    title = L('Həftəlik hesabat', 'Weekly report');
     period = `${human(from)} – ${human(to)}`;
-    filename = `heftelik-hesabat-${from}.xlsx`;
+    filename = `${L('heftelik-hesabat', 'weekly-report')}-${from}.xlsx`;
   } else if (scope === 'category') {
     const cat = getCategory(Number(req.query.category), uid);
     if (!cat) return res.status(404).json({ error: 'not_found' });
     rows = db.prepare(`${REPORT_SELECT} AND t.category_id = ?${NOT_PROJECTED}${ORDER}`).all(uid, cat.id, today);
-    title = `Kateqoriya hesabatı: ${cat.name}`;
-    period = spanOf(rows, 'Tapşırıq yoxdur');
-    filename = `kateqoriya-${slugify(cat.name) || 'kateqoriya'}-${today}.xlsx`;
+    title = `${L('Kateqoriya hesabatı', 'Category report')}: ${cat.name}`;
+    period = spanOf(rows, L('Tapşırıq yoxdur', 'No tasks'));
+    filename = `${L('kateqoriya', 'category')}-${slugify(cat.name) || L('kateqoriya', 'category')}-${today}.xlsx`;
   } else if (scope === 'custom') {
     const hasFrom = DATE_RE.test(from || '');
     const hasTo = DATE_RE.test(to || '');
@@ -600,24 +726,24 @@ app.get('/api/reports/export', auth, async (req, res) => {
     if (hasTo) { sql += ' AND t.date <= ?'; args.push(to); }
     if (cats.length) { sql += ` AND t.category_id IN (${cats.map(() => '?').join(',')})`; args.push(...cats); }
     rows = db.prepare(sql + ORDER).all(...args);
-    title = 'Fərdi hesabat';
+    title = L('Fərdi hesabat', 'Custom report');
     period = hasFrom || hasTo
-      ? `${hasFrom ? human(from) : 'başlanğıc'} – ${hasTo ? human(to) : 'bu gün'}`
-      : spanOf(rows, 'Tapşırıq yoxdur');
+      ? `${hasFrom ? human(from) : L('başlanğıc', 'start')} – ${hasTo ? human(to) : L('bu gün', 'today')}`
+      : spanOf(rows, L('Tapşırıq yoxdur', 'No tasks'));
     if (cats.length) {
       const names = db.prepare(`SELECT name FROM categories WHERE user_id = ? AND id IN (${cats.map(() => '?').join(',')})`).all(uid, ...cats);
       period += `  ·  ${names.map((n) => n.name).join(', ')}`;
     }
-    filename = `ferdi-hesabat-${hasFrom ? from : 'baslangic'}-${hasTo ? to : today}.xlsx`;
+    filename = `${L('ferdi-hesabat', 'custom-report')}-${hasFrom ? from : L('baslangic', 'start')}-${hasTo ? to : today}.xlsx`;
   } else {
     rows = db.prepare(`${REPORT_SELECT}${NOT_PROJECTED}${ORDER}`).all(uid, today);
-    title = 'Ümumi hesabat (bütün dövr)';
-    period = spanOf(rows, 'Hələ tapşırıq yoxdur');
-    filename = `umumi-hesabat-${today}.xlsx`;
+    title = L('Ümumi hesabat (bütün dövr)', 'All-time report');
+    period = spanOf(rows, L('Hələ tapşırıq yoxdur', 'No tasks yet'));
+    filename = `${L('umumi-hesabat', 'all-time-report')}-${today}.xlsx`;
   }
 
   try {
-    const buf = await buildReport({ tasks: rows, title, period, user: req.user, tz, today });
+    const buf = await buildReport({ tasks: rows, title, period, user: req.user, tz, today, lang });
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(Buffer.from(buf));
@@ -644,4 +770,6 @@ if (fs.existsSync(dist)) {
   });
 }
 
-app.listen(PORT, () => console.log(`Khaya's Planner listening on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Plan it! listening on http://localhost:${PORT}`));
+startTelegram();
+startReminders({ sendPush, hasPush });

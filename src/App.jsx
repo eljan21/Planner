@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from './api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, lastWriteAt } from './api';
+import { useLiveRefresh } from './liveRefresh';
 import Login from './components/Login';
-import Sidebar from './components/Sidebar';
+import TopBand from './components/TopBand';
+import MenuDrawer from './components/MenuDrawer';
+import Party from './characters/Party';
+import { buddyBus } from './characters/bus';
+import { PEOPLE, buddyFor, crewOf, pick } from './characters/people';
+import Onboarding from './characters/Onboarding';
 import SearchModal from './components/SearchModal';
 import { localAppearance, resolveTheme, useAppearance } from './theme';
 import { DEFAULT_SETTINGS, SettingsContext, isProjection } from './settings';
@@ -12,16 +18,40 @@ import Board from './components/Board';
 import DonePage from './components/DonePage';
 import ReportsPage from './components/ReportsPage';
 import NotesPage from './components/NotesPage';
-import WeekSwitcher from './components/WeekSwitcher';
+import ProfilePage from './components/ProfilePage';
+import FriendsPage from './components/FriendsPage';
+import AppBanner from './components/AppBanner';
+import { clearInvite, pendingInvite } from './pwa';
 import TaskModal from './components/TaskModal';
 import Toast from './components/Toast';
+import { getLang, langChosenHere, setLang, tr, useLang } from './i18n';
 import {
-  addDays, formatDay, formatRange, fromKey, setWeekStartsOn, startOfWeek, toKey, todayKey, weekKeys, weekLabel,
+  addDays, doneKey, formatDay, fromKey, setWeekStartsOn, startOfWeek, toKey, todayKey, weekKeys, weekdayIndex,
 } from './dates';
 
 const HINT_KEY = 'tp_hint_dismissed';
 const readHint = () => { try { return localStorage.getItem(HINT_KEY) === '1'; } catch { return false; } };
 const writeHint = () => { try { localStorage.setItem(HINT_KEY, '1'); } catch { /* ignore */ } };
+
+const VIEWS = ['week', 'notes', 'done', 'reports', 'settings', 'profile', 'friends'];
+/** a notification can open a section directly: /?view=friends */
+function initialView() {
+  const params = new URLSearchParams(window.location.search);
+  const v = params.get('view');
+  if (!v) return 'week';
+  params.delete('view');
+  const rest = params.toString();
+  window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+  return VIEWS.includes(v) ? v : 'week';
+}
+
+const BOARD_DAYS = 5;
+/** first column of the board for a date: Monday of its week on weekdays, the day itself on weekends */
+const boardStartFor = (key) => {
+  const d = fromKey(key);
+  const i = weekdayIndex(d);
+  return i < 5 ? toKey(addDays(d, -i)) : key;
+};
 
 export default function App() {
   const [config, setConfig] = useState(null);
@@ -31,8 +61,12 @@ export default function App() {
   const [notes, setNotes] = useState([]);
   const [categories, setCategories] = useState([]);
   const [editingCat, setEditingCat] = useState(null);
-  const [view, setView] = useState('week');
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [view, setView] = useState(initialView);
+  const [mode, setMode] = useState('today'); // home opens on today's tasks; 'all' is the five-day board
+  const [start, setStart] = useState(() => boardStartFor(todayKey()));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [requests, setRequests] = useState(0); // incoming friend requests
+  const [party, setParty] = useState(null);
   const [slide, setSlide] = useState(null);
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState(null);
@@ -56,12 +90,24 @@ export default function App() {
     try { localStorage.setItem('tp_app_name', appName); } catch { /* ignore */ }
   }, [appName]);
 
-  // re-align the visible week when the first day of the week changes
-  useEffect(() => { setWeekStart((w) => startOfWeek(w)); }, [settings?.weekStartsOn]);
+  // notes are kept per week; the board shows five days from `start`
+  const weekStart = useMemo(() => startOfWeek(fromKey(start)), [start, settings?.weekStartsOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  const days = useMemo(() => Array.from({ length: BOARD_DAYS }, (_, i) => toKey(addDays(fromKey(start), i))), [start]);
+  const anim = settings?.anim ?? 'full';
 
   const signIn = useCallback((r) => {
-    setSettings({ ...DEFAULT_SETTINGS, ...r.settings });
+    // language: a choice made on this device wins (and is saved to the account); otherwise use the account's
+    const saved = r.settings?.lang;
+    if (langChosenHere() && saved !== getLang()) api.saveSettings({ lang: getLang() }).catch(() => {});
+    else if (!langChosenHere() && saved) setLang(saved);
+    setSettings({ ...DEFAULT_SETTINGS, ...r.settings, lang: langChosenHere() ? getLang() : saved || getLang() });
     setUser(r.user);
+    // the Telegram bot formats times in the user's own time zone
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && r.settings?.tz !== tz) {
+      setSettings((cur) => ({ ...cur, tz }));
+      api.saveSettings({ tz }).catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -83,9 +129,24 @@ export default function App() {
 
   useEffect(() => { if (user) reload(); }, [user, reload]);
 
+  // arrived through someone's invite link: become friends right after signing in
+  useEffect(() => {
+    const code = user && pendingInvite();
+    if (!code) return;
+    clearInvite();
+    api.acceptInvite(code).then((r) => {
+      if (r.status === 'accepted') setToast({ message: tr(`${r.user.name} ilə artıq dostsunuz 🤝`, `You and ${r.user.name} are now friends 🤝`) });
+    }).catch(() => {});
+  }, [user]);
+
+  // friend requests: on sign-in, then kept fresh in the background
+  const checkRequests = useCallback(() => api.friends().then((d) => setRequests(d.incoming.length)).catch(() => {}), []);
+  useEffect(() => { if (user) checkRequests(); }, [user, checkRequests]);
+  useLiveRefresh(checkRequests, 30e3, !!user);
+
   const fail = useCallback((e) => {
     if (e?.status === 401) { setUser(null); return; }
-    setToast({ message: 'Xəta baş verdi — məlumatlar yeniləndi.' });
+    setToast({ message: tr('Xəta baş verdi — məlumatlar yeniləndi.', 'Something went wrong — your data was refreshed.') });
     reload();
   }, [reload]);
 
@@ -94,6 +155,7 @@ export default function App() {
     try {
       const t = await api.create(data);
       setTasks((ts) => [...ts, t]);
+      buddyBus.emit('add');
     } catch (e) { fail(e); }
   }, [fail]);
 
@@ -111,19 +173,22 @@ export default function App() {
   const saveFromModal = useCallback(async (task, data, { repeat, applyFuture }) => {
     try {
       let saved;
-      if (task.id) saved = await saveTask(task, data);
-      else {
+      if (task.id) {
+        saved = await saveTask(task, data);
+        if (data.date && data.date !== task.date) buddyBus.emit(data.date > task.date ? 'lazy' : 'early');
+      } else {
         saved = await api.create(data);
         setTasks((ts) => [...ts, saved]);
+        buddyBus.emit('add');
       }
       if (repeat) {
         await api.makeRecurring(saved.id, repeat);
         await reloadTasks();
-        setToast({ message: 'Təkrarlanan tapşırıq yaradıldı 🔁' });
+        setToast({ message: tr('Təkrarlanan tapşırıq yaradıldı 🔁', 'Repeating task created 🔁') });
       } else if (applyFuture && task.recurId) {
         await api.applyRecurring(task.recurId, task.id);
         await reloadTasks();
-        setToast({ message: 'Gələcək təkrarlar da yeniləndi' });
+        setToast({ message: tr('Gələcək təkrarlar da yeniləndi', 'Future repeats updated too') });
       }
     } catch (e) { fail(e); }
   }, [saveTask, reloadTasks, fail]);
@@ -132,7 +197,7 @@ export default function App() {
     try {
       const { removed } = await api.stopRecurring(task.recurId, task.date);
       await reloadTasks();
-      setToast({ message: `Təkrar dayandırıldı · ${removed} gələcək tapşırıq silindi` });
+      setToast({ message: tr(`Təkrar dayandırıldı · ${removed} gələcək tapşırıq silindi`, `Repeat stopped · ${removed} future task${removed === 1 ? '' : 's'} removed`) });
     } catch (e) { fail(e); }
   }, [reloadTasks, fail]);
 
@@ -153,28 +218,50 @@ export default function App() {
   }, [fail]);
 
   const restoreTask = useCallback((task, keepPosition = false) => {
+    buddyBus.emit('restore');
     setDone((ds) => ds.filter((t) => t.id !== task.id));
     setTasks((ts) => [...ts, { ...task, done: false, doneAt: null, position: keepPosition ? task.position : 1e9 }]);
     const patch = keepPosition ? { done: false, position: task.position } : { done: false };
     api.update(task.id, patch).then((srv) => replace(setTasks, srv)).catch(fail);
   }, [fail]);
 
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const doneRef = useRef(done);
+  doneRef.current = done;
+
   const completeTask = useCallback((task) => {
     const finished = { ...task, done: true, doneAt: new Date().toISOString() };
     setTasks((ts) => ts.filter((t) => t.id !== task.id));
     setDone((ds) => [finished, ...ds]);
     api.update(task.id, { done: true }).then((srv) => replace(setDone, srv)).catch(fail);
-    setToast({ message: 'Tamamlandı 🎉', action: { label: 'Geri al', fn: () => restoreTask(task, true) } });
-  }, [fail, restoreTask]);
+    setToast({ message: tr('Tamamlandı', 'Done'), action: { label: tr('Geri al', 'Undo'), fn: () => restoreTask(task, true) } });
+
+    // the last open task of today: everyone celebrates
+    const today = todayKey();
+    const leftToday = tasksRef.current.filter((t) => t.date === today && t.id !== task.id).length;
+    if (task.date === today && leftToday === 0) {
+      const star = buddyFor(new Date(), crewOf(settings));
+      const line = pick(PEOPLE[star].done);
+      // Friday (or later) closes the week: group photo with the week's count
+      const week = weekdayIndex(new Date()) >= 4;
+      const monday = toKey(addDays(new Date(), -weekdayIndex(new Date())));
+      const weekCount = doneRef.current.filter((t) => doneKey(t) >= monday).length + 1;
+      buddyBus.emit('party', { line });
+      if (settings?.anim !== 'off' && settings?.anim !== 'calm') setParty({ week, weekCount, line, star });
+    } else {
+      buddyBus.emit('done');
+    }
+  }, [fail, restoreTask, settings]);
 
   const deleteTask = useCallback((task) => {
     setTasks((ts) => ts.filter((t) => t.id !== task.id));
     setDone((ds) => ds.filter((t) => t.id !== task.id));
     api.remove(task.id).catch(fail);
     setToast({
-      message: 'Tapşırıq silindi',
+      message: tr('Tapşırıq silindi', 'Task deleted'),
       action: {
-        label: 'Geri al',
+        label: tr('Geri al', 'Undo'),
         fn: async () => {
           try {
             const t = await api.create({
@@ -201,28 +288,38 @@ export default function App() {
     api.reorder(date, ids).catch(fail);
   }, [fail]);
 
+  /** show the board from a date key (Monday of its week, or the weekend day itself) */
+  const goToDay = useCallback((key, exact = false) => {
+    const next = exact ? key : boardStartFor(key);
+    setSlide(next < start ? 'prev' : 'next');
+    setStart(next);
+  }, [start]);
   const goToWeek = useCallback((target, dir) => {
     setSlide(dir);
-    setWeekStart(target);
+    setStart(toKey(target));
   }, []);
   const shiftWeek = useCallback((n) => {
     setSlide(n > 0 ? 'next' : 'prev');
-    setWeekStart((w) => addDays(w, 7 * n));
+    setStart((k) => toKey(addDays(fromKey(k), 7 * n)));
   }, []);
-  const goToday = useCallback(() => {
-    const target = startOfWeek(new Date());
-    goToWeek(target, target < weekStart ? 'prev' : 'next');
-  }, [goToWeek, weekStart]);
+  const goToday = useCallback(() => goToDay(todayKey()), [goToDay]);
 
   const moveWeek = useCallback((task, delta) => {
     const newDate = toKey(addDays(fromKey(task.date), delta));
     setTasks((ts) => ts.map((t) => (t.id === task.id ? { ...t, date: newDate, position: 1e9 } : t)));
     api.update(task.id, { date: newDate }).then((srv) => replace(setTasks, srv)).catch(fail);
+    buddyBus.emit(delta > 0 ? 'lazy' : 'early');
+    const where = {
+      1: tr('Sabaha köçürüldü', 'Moved to tomorrow'),
+      '-1': tr('Dünənə köçürüldü', 'Moved to yesterday'),
+      7: tr('Növbəti həftəyə köçürüldü', 'Moved to next week'),
+      '-7': tr('Əvvəlki həftəyə köçürüldü', 'Moved to last week'),
+    }[delta];
     setToast({
-      message: delta > 0 ? 'Növbəti həftəyə köçürüldü' : 'Əvvəlki həftəyə köçürüldü',
-      action: { label: 'Göstər', fn: () => goToWeek(startOfWeek(fromKey(newDate)), delta > 0 ? 'next' : 'prev') },
+      message: where,
+      action: { label: tr('Göstər', 'Show'), fn: () => { setMode('all'); goToDay(newDate); } },
     });
-  }, [fail, goToWeek]);
+  }, [fail, goToDay]);
 
   // ---------- note actions ----------
   const addNote = useCallback(async (data) => {
@@ -258,16 +355,17 @@ export default function App() {
     if (task.done) { setView('done'); return; }
     setView('week');
     setFilter(null);
-    const target = startOfWeek(fromKey(task.date));
-    goToWeek(target, target < weekStart ? 'prev' : 'next');
-  }, [goToWeek, weekStart]);
+    setMode(task.date === todayKey() ? 'today' : 'all');
+    goToDay(task.date);
+  }, [goToDay]);
 
   const noteToTask = useCallback(async (note, data) => {
     try {
       const { task, note: updated } = await api.noteToTask(note.id, data);
       setTasks((ts) => [...ts, task]);
       replace(setNotes, updated);
-      setToast({ message: `Tapşırıq əlavə edildi · ${formatDay(task.date)}`, action: { label: 'Göstər', fn: () => showTask(task) } });
+      buddyBus.emit('add');
+      setToast({ message: tr(`Tapşırıq əlavə edildi · ${formatDay(task.date)}`, `Task added · ${formatDay(task.date)}`), action: { label: tr('Göstər', 'Show'), fn: () => showTask(task) } });
     } catch (e) { fail(e); }
   }, [fail, showTask]);
 
@@ -280,7 +378,7 @@ export default function App() {
       } else {
         const c = await api.createCategory(data);
         setCategories((cs) => [...cs, c]);
-        setToast({ message: `«${c.name}» kateqoriyası yaradıldı` });
+        setToast({ message: tr(`«${c.name}» kateqoriyası yaradıldı`, `Category «${c.name}» created`) });
       }
     } catch (e) { fail(e); }
   }, [fail]);
@@ -292,7 +390,7 @@ export default function App() {
       setTasks((ts) => ts.filter((t) => t.categoryId !== cat.id));
       setDone((ds) => ds.filter((t) => t.categoryId !== cat.id));
       setFilter((f) => (f === cat.id ? null : f));
-      setToast({ message: removedTasks ? `«${cat.name}» və ${removedTasks} tapşırıq silindi` : `«${cat.name}» silindi` });
+      setToast({ message: removedTasks ? tr(`«${cat.name}» və ${removedTasks} tapşırıq silindi`, `«${cat.name}» and ${removedTasks} task${removedTasks === 1 ? '' : 's'} deleted`) : tr(`«${cat.name}» silindi`, `«${cat.name}» deleted`) });
     } catch (e) { fail(e); }
   }, [fail]);
 
@@ -307,25 +405,25 @@ export default function App() {
   const moveOverdue = useCallback(() => {
     setTasks((ts) => ts.map((t, i) => (t.date < today && !t.recurId ? { ...t, date: today, position: 1e6 + i } : t)));
     api.moveOverdue(today).then(reload).catch(fail);
-    setToast({ message: `${overdue.length} tapşırıq bu günə köçürüldü` });
-    goToWeek(startOfWeek(new Date()), 'next');
-  }, [today, overdue.length, reload, fail, goToWeek]);
+    setToast({ message: tr(`${overdue.length} tapşırıq bu günə köçürüldü`, `${overdue.length} task${overdue.length === 1 ? '' : 's'} moved to today`) });
+    buddyBus.emit('early');
+    goToDay(today);
+  }, [today, overdue.length, reload, fail, goToDay]);
 
   const openNew = useCallback(() => {
-    const keys = weekKeys(weekStart);
-    const date = keys.includes(today) ? today : keys[0];
+    const date = mode === 'today' || days.includes(today) ? today : days[0];
     setEditing({ title: '', note: '', date, categoryId: filter ?? categories[0]?.id });
-  }, [weekStart, today, filter, categories]);
+  }, [mode, days, today, filter, categories]);
 
   const pickSearch = useCallback((t) => {
     setSearchOpen(false);
     if (t.done) { setView('done'); return; }
     setView('week');
     setFilter(null);
-    const target = startOfWeek(fromKey(t.date));
-    goToWeek(target, target < weekStart ? 'prev' : 'next');
+    setMode(t.date === todayKey() ? 'today' : 'all');
+    goToDay(t.date);
     setEditing(t);
-  }, [goToWeek, weekStart]);
+  }, [goToDay]);
 
   const pickNote = useCallback((n) => {
     setSearchOpen(false);
@@ -343,22 +441,24 @@ export default function App() {
         setSearchOpen((o) => !o);
         return;
       }
-      if (editing || editingCat || searchOpen || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (editing || editingCat || searchOpen || menuOpen || party || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.target.closest('input, textarea, select, [contenteditable]')) return;
-      const weekly = view === 'week' || view === 'notes';
+      const weekly = (view === 'week' && mode === 'all') || view === 'notes';
       if (weekly && e.key === 'ArrowLeft') shiftWeek(-1);
       else if (weekly && e.key === 'ArrowRight') shiftWeek(1);
-      else if (e.key === 't' || e.key === 'T') { setView('week'); goToday(); }
+      else if (e.key === 't' || e.key === 'T') { setView('week'); setMode('today'); }
+      else if (e.key === 'w' || e.key === 'W') { setView('week'); setMode('all'); }
       else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openNew(); }
       else if (e.key === '1') setView('week');
       else if (e.key === '2') setView('notes');
       else if (e.key === '3') setView('done');
       else if (e.key === '4') setView('reports');
       else if (e.key === '5') setView('settings');
+      else if (e.key === '6') setView('friends');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [user, editing, editingCat, searchOpen, view, shiftWeek, goToday, openNew]);
+  }, [user, editing, editingCat, searchOpen, menuOpen, party, view, mode, shiftWeek, openNew]);
 
   const logout = async () => {
     await api.logout().catch(() => {});
@@ -368,77 +468,98 @@ export default function App() {
     setSettings(null); setUser(null); setView('week');
   };
 
+  // tasks changed elsewhere (phone, Telegram «Bitdi») show up without a reload — but never under the user's hands
+  const userBusy = useRef(false);
+  userBusy.current = !!(editing || editingCat || searchOpen);
+  const refreshTasks = useCallback(() => {
+    if (userBusy.current || document.querySelector('.board.dragging') || Date.now() - lastWriteAt() < 4000) return;
+    reload();
+  }, [reload]);
+  useLiveRefresh(refreshTasks, 30e3, !!user);
+
+  const lang = useLang(); // re-renders everything on a language switch
+  useEffect(() => {
+    if (user && settings && settings.lang !== lang) updateSettings({ lang });
+  }, [lang, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const closeParty = useCallback(() => setParty(null), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
   // ---------- render ----------
   if (user === undefined || config === null) {
     return <div className="splash"><span className="logo pulse">✓</span></div>;
   }
-  if (!user) return <Login config={config} appName={appName} onLogin={signIn} theme={theme} onToggleTheme={toggleTheme} />;
+  if (!user) return <Login config={config} onLogin={signIn} theme={theme} onToggleTheme={toggleTheme} />;
 
   const keys = weekKeys(weekStart);
-  const inFilter = (t) => !filter || t.categoryId === filter;
-  const weekDone = done.filter((t) => inFilter(t) && t.date >= keys[0] && t.date <= keys[6]).length;
-  const weekOpen = tasks.filter((t) => inFilter(t) && t.date >= keys[0] && t.date <= keys[6]).length;
-  const weekTotal = weekDone + weekOpen;
   const real = tasks.filter((t) => !isProjection(t, today));
   const counts = real.reduce((m, t) => { m[t.categoryId] = (m[t.categoryId] || 0) + 1; return m; }, {});
   const catTotal = (id) => real.filter((t) => t.categoryId === id).length + done.filter((t) => t.categoryId === id).length;
   const rulesById = new Map(rules.map((r) => [r.id, r]));
   const noteCount = notes.filter((n) => n.week === keys[0]).length;
+  const todayOpen = tasks.filter((t) => t.date === today).length;
+  const todayDone = done.filter((t) => t.date === today).length;
+  const todayTotal = todayOpen + todayDone;
+  const buddyStatus = !todayTotal ? tr('Bu gün üçün hələ tapşırıq yoxdur.', 'Nothing planned for today yet.')
+    : todayOpen ? tr(`Bu gün ${todayOpen} iş qalıb.`, `${todayOpen} task${todayOpen === 1 ? '' : 's'} left today.`)
+      : tr('Bu günün bütün işləri bitib.', 'Everything for today is done.');
+  const busy = new Set(real.map((t) => t.date));
 
   return (
     <SettingsContext.Provider value={settings}>
     <CategoriesContext.Provider value={catCtx}>
     <div className="app">
-      <Sidebar
+      <TopBand
+        appName={appName}
+        name={settings.name}
+        requests={requests}
+        onProfile={() => setView('profile')}
+        onHome={() => { setView('week'); setMode('today'); setFilter(null); }}
+        atHome={view === 'week' && mode === 'today' && !filter}
+        crew={crewOf(settings)}
         user={user}
-        view={view}
-        setView={setView}
-        doneCount={done.length}
-        noteCount={noteCount}
-        counts={counts}
-        filter={filter}
-        setFilter={setFilter}
-        onNew={openNew}
-        onSearch={() => setSearchOpen(true)}
-        onLogout={logout}
+        todayDone={todayDone}
+        todayTotal={todayTotal}
         theme={theme}
         onToggleTheme={toggleTheme}
-        onEditCategory={setEditingCat}
-        onReorderCategories={reorderCategories}
+        onSearch={() => setSearchOpen(true)}
+        onMenu={() => setMenuOpen(true)}
+        showBoard={view === 'week'}
+        mode={mode}
+        onMode={setMode}
+        days={days}
+        busy={busy}
+        onShift={shiftWeek}
+        onPick={(k) => goToDay(k, true)}
+        onToday={goToday}
+        filterName={filter ? catCtx.byId.get(filter)?.name : null}
+        onClearFilter={() => setFilter(null)}
+        buddyStatus={buddyStatus}
+        overdue={overdue.length}
+        anim={anim}
       />
 
       <main className="panel">
         {view === 'week' && (
           <>
-            <div className="panel-head">
-              <div className="week-title">
-                <h1>
-                  {filter ? catCtx.byId.get(filter)?.name : 'Həftəm'}
-                  {filter && <button className="filter-chip" onClick={() => setFilter(null)} title="Filtri sil">× filtr</button>}
-                </h1>
-                <span className="muted">{weekLabel(weekStart)} · {formatRange(weekStart)}</span>
-              </div>
-
-              <div className="head-controls">
-                <div className="week-progress" title={`${weekDone} / ${weekTotal} tamamlanıb`}>
-                  <div className="wp-track"><div className="wp-fill" style={{ width: `${weekTotal ? (weekDone / weekTotal) * 100 : 0}%` }} /></div>
-                  <span>{weekDone}/{weekTotal}</span>
-                </div>
-                <WeekSwitcher weekStart={weekStart} onShift={shiftWeek} onGo={goToWeek} onToday={goToday} />
-              </div>
-            </div>
-
             {overdue.length > 0 && (
               <div className="banner">
-                <span>⏰ Keçmiş günlərdə <b>{overdue.length}</b> tamamlanmamış tapşırıq var.</span>
-                <button className="btn sm dark" onClick={moveOverdue}>Hamısını bu günə köçür</button>
+                <span>
+                  {tr('Keçmiş günlərdə', overdue.length === 1 ? 'There is' : 'There are')} <b>{overdue.length}</b>{' '}
+                  {tr('tamamlanmamış tapşırıq var.', overdue.length === 1 ? 'unfinished task from past days.' : 'unfinished tasks from past days.')}
+                </span>
+                <button className="btn sm dark" onClick={moveOverdue}>{tr('Hamısını bu günə köçür', 'Move them all to today')}</button>
               </div>
             )}
 
+            <AppBanner />
+
             {!hintHidden && (
               <div className="hint">
-                <span>💡 Tapşırığı tutub sürüşdür — başqa günə, ya da kənarlara aparıb başqa həftəyə köçür. Telefonda sağa/sola sürüşdürərək həftəni dəyiş.</span>
-                <button className="icon-btn sm" aria-label="Bağla" onClick={() => { writeHint(); setHintHidden(true); }}>×</button>
+                <span>{mode === 'today'
+                  ? tr('Bu gün yalnız bugünkü işlər görünür. Tapşırığı sağ kənara sürüşdürsən sabaha keçər; bütün həftə üçün yuxarıda «Ümumi»yə bas.', "Only today's tasks are shown here. Drag a task to the right edge to move it to tomorrow; for the whole week press «Overview» above.")
+                  : tr('Tapşırığı tutub başqa günə sürüşdür, ya da kənara aparıb başqa həftəyə köçür. Digər günlər üçün təqvimdən istifadə et.', 'Drag a task to another day, or to the edge to move it to another week. Use the calendar for other days.')}</span>
+                <button className="icon-btn sm" aria-label={tr('Bağla', 'Close')} onClick={() => { writeHint(); setHintHidden(true); }}>×</button>
               </div>
             )}
 
@@ -447,13 +568,15 @@ export default function App() {
               setTasks={setTasks}
               done={done}
               filter={filter}
-              defaultCategory={categories[0]?.id}
-              weekStart={weekStart}
-              slide={slide}
+              defaultCategory={filter ?? categories[0]?.id}
+              days={mode === 'today' ? [today] : days}
+              single={mode === 'today'}
+              slide={mode === 'today' ? null : slide}
               onSwipe={shiftWeek}
               onAdd={addTask}
               onOpen={setEditing}
               onComplete={completeTask}
+              onRestore={(t) => restoreTask(t)}
               onReorder={reorder}
               onMoveWeek={moveWeek}
             />
@@ -483,12 +606,52 @@ export default function App() {
 
         {view === 'reports' && <ReportsPage tasks={tasks} done={done} />}
 
+        {view === 'profile' && (
+          <ProfilePage
+            user={user}
+            displayName={settings.name || (user.name || '').split(' ')[0]}
+            onAvatar={(picture) => setUser((u) => ({ ...u, picture }))}
+            onFriends={() => setView('friends')}
+          />
+        )}
+
+        {view === 'friends' && <FriendsPage onChanged={setRequests} />}
+
         {view === 'settings' && (
           <SettingsPage user={user} onChange={updateSettings} onEditCategory={setEditingCat} onLogout={logout} />
         )}
       </main>
 
-      <button className="fab" onClick={openNew} aria-label="Yeni tapşırıq">+</button>
+      <button className="fab" onClick={openNew} aria-label={tr('Yeni tapşırıq', 'New task')}>+</button>
+
+      {menuOpen && (
+        <MenuDrawer
+          user={user}
+          view={view}
+          setView={setView}
+          doneCount={done.length}
+          noteCount={noteCount}
+          requests={requests}
+          counts={counts}
+          filter={filter}
+          setFilter={setFilter}
+          onSearch={() => setSearchOpen(true)}
+          onEditCategory={setEditingCat}
+          onReorderCategories={reorderCategories}
+          onChange={updateSettings}
+          onLogout={logout}
+          onClose={closeMenu}
+        />
+      )}
+
+      {party && <Party party={party} star={party.star} crew={crewOf(settings)} sound={settings.sound} onClose={closeParty} />}
+
+      {!settings.onboarded && (
+        <Onboarding
+          user={user}
+          onDone={({ name, crew }) => updateSettings({ name, crew, appName: `${name}'s Planner`, onboarded: true })}
+        />
+      )}
 
       {editing && (
         <TaskModal

@@ -9,8 +9,11 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import TaskCard from './TaskCard';
 import { IconChevron } from './Icons';
-import { DAYS, MONTHS_SHORT, dayShort, fromKey, todayKey, weekKeys } from '../dates';
-import { dayColorClass, sortTasks, useSettings } from '../settings';
+import { DAYS, MONTHS_SHORT, fromKey, todayKey, weekdayIndex } from '../dates';
+import { sortTasks, useSettings } from '../settings';
+import { useCategories } from '../categories';
+import { buddyBus } from '../characters/bus';
+import { tr } from '../i18n';
 
 const tid = (id) => `t${id}`;
 const parseTid = (s) => Number(String(s).slice(1));
@@ -32,47 +35,68 @@ function SortableTask({ task, onOpen, onComplete }) {
 }
 
 function QuickAdd({ date, category, onAdd }) {
-  const [open, setOpen] = useState(false);
   const [value, setValue] = useState('');
+  const [cat, setCat] = useState(category);
+  const { list } = useCategories();
+  useEffect(() => setCat(category), [category]);
 
-  if (!open) {
-    return (
-      <button className="add-row" onClick={() => setOpen(true)} data-add={date}>
-        <span>Tapşırıq əlavə et</span>
-        <i className="lime-btn" aria-hidden="true">+</i>
-      </button>
-    );
-  }
   return (
     <form
       className="quick-add"
+      data-add={date}
       onSubmit={(e) => {
         e.preventDefault();
         const title = value.trim();
-        if (title) { onAdd({ title, date, categoryId: category }); setValue(''); }
+        if (title) { onAdd({ title, date, categoryId: cat ?? category }); setValue(''); }
       }}
     >
       <input
-        autoFocus
         value={value}
         maxLength={200}
-        placeholder="Nə etmək lazımdır? (Enter)"
+        placeholder={tr('+ Tapşırıq əlavə et', '+ Add a task')}
+        aria-label={tr(`${DAYS[weekdayIndex(fromKey(date))]} üçün yeni tapşırıq`, `New task for ${DAYS[weekdayIndex(fromKey(date))]}`)}
         onChange={(e) => setValue(e.target.value)}
-        onBlur={() => { if (!value.trim()) setOpen(false); }}
-        onKeyDown={(e) => { if (e.key === 'Escape') { setValue(''); setOpen(false); } }}
+        onKeyDown={(e) => { if (e.key === 'Escape') { setValue(''); e.currentTarget.blur(); } }}
       />
+      <div className="qa-chips">
+        {list.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className={`qa-chip c-${c.color}${c.id === cat ? ' on' : ''}`}
+            aria-pressed={c.id === cat}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setCat(c.id)}
+          >
+            <i className="dot-c" />{c.name}
+          </button>
+        ))}
+      </div>
     </form>
   );
 }
 
-function DayColumn({ date, tasks, doneCount, highlight, category, onAdd, onOpen, onComplete }) {
+function DoneRow({ task, onRestore }) {
+  const { byId } = useCategories();
+  const color = byId.get(task.categoryId)?.color || 'gray';
+  return (
+    <div className={`done-row c-${color}`}>
+      <button className="check checked" aria-label={tr('Geri al', 'Undo')} title={tr('Geri al', 'Undo')} onClick={() => onRestore(task)}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+      </button>
+      <span>{task.title}</span>
+    </div>
+  );
+}
+
+function DayColumn({ date, tasks, doneTasks, highlight, category, onAdd, onOpen, onComplete, onRestore }) {
   const { setNodeRef } = useDroppable({ id: `day:${date}` });
-  const settings = useSettings();
   const d = fromKey(date);
   const today = todayKey();
   const isToday = date === today;
   const isPast = date < today;
-  const idx = (d.getDay() + 6) % 7;
+  const idx = weekdayIndex(d);
+  const total = tasks.length + doneTasks.length;
 
   return (
     <section
@@ -81,12 +105,9 @@ function DayColumn({ date, tasks, doneCount, highlight, category, onAdd, onOpen,
       className={`day${isToday ? ' today' : ''}${isPast ? ' past' : ''}${highlight ? ' over' : ''}`}
     >
       <div className="day-inner">
-        <header className={`day-head ${dayColorClass(settings, idx)}`}>
-          <span className="day-name">{DAYS[idx]}</span>
-          <span className="day-date">
-            {isToday && <em className="today-dot" title="Bu gün" />}
-            {d.getDate()} {MONTHS_SHORT[d.getMonth()]}
-          </span>
+        <header className="day-head">
+          <span className="day-name">{DAYS[idx]}{isToday && <em className="today-badge">{tr('Bu gün', 'Today')}</em>}</span>
+          <span className="day-date">{d.getDate()} {MONTHS_SHORT[d.getMonth()]}{total > 0 && ` · ${doneTasks.length}/${total}`}</span>
         </header>
         <div className="day-body">
           <SortableContext items={tasks.map((t) => tid(t.id))} strategy={verticalListSortingStrategy}>
@@ -94,10 +115,15 @@ function DayColumn({ date, tasks, doneCount, highlight, category, onAdd, onOpen,
               <SortableTask key={t.id} task={t} onOpen={onOpen} onComplete={onComplete} />
             ))}
           </SortableContext>
-          {tasks.length === 0 && <div className="empty-day">{isPast ? 'Boş gün' : 'Sərbəst gün ✨'}</div>}
+          {tasks.length === 0 && doneTasks.length === 0 && <div className="empty-day">{isPast ? tr('Boş gün', 'Nothing here') : tr('Sərbəst gün', 'Free day')}</div>}
+          {doneTasks.length > 0 && (
+            <div className="day-done">
+              <div className="done-sep">{tr('Bitənlər', 'Done')}</div>
+              {doneTasks.map((t) => <DoneRow key={t.id} task={t} onRestore={onRestore} />)}
+            </div>
+          )}
         </div>
         <footer className="day-foot">
-          {doneCount > 0 && <span className="done-count" title="Bu gün üçün tamamlanan">✓ {doneCount} tamamlanıb</span>}
           <QuickAdd date={date} category={category} onAdd={onAdd} />
         </footer>
       </div>
@@ -105,10 +131,15 @@ function DayColumn({ date, tasks, doneCount, highlight, category, onAdd, onOpen,
   );
 }
 
-function WeekZone({ side, visible, over }) {
+const zoneLabel = (step, side) => ({
+  1: { prev: tr('← Dünən', '← Yesterday'), next: tr('Sabah →', 'Tomorrow →') },
+  7: { prev: tr('← Əvvəlki həftə', '← Previous week'), next: tr('Növbəti həftə →', 'Next week →') },
+}[step][side]);
+
+function WeekZone({ side, step, visible, over }) {
   return (
     <div data-zone={side} className={`week-zone ${side}${visible ? ' visible' : ''}${over ? ' over' : ''}`}>
-      <span>{side === 'prev' ? '← Əvvəlki həftə' : 'Növbəti həftə →'}</span>
+      <span>{zoneLabel(step, side)}</span>
     </div>
   );
 }
@@ -123,10 +154,13 @@ function zoneAt(x, y) {
 }
 
 export default function Board({
-  tasks: allTasks, setTasks, done, filter, defaultCategory, weekStart, slide, onSwipe, onAdd, onOpen, onComplete, onReorder, onMoveWeek,
+  tasks: allTasks, setTasks, done, filter, defaultCategory, days, slide, onSwipe, onAdd, onOpen, onComplete, onRestore, onReorder, onMoveWeek,
+  single = false,
 }) {
+  // the "today" view is one wide column; its edge zones move a task by a day instead of a week
+  const zoneStep = single ? 1 : 7;
   const settings = useSettings();
-  const allDays = useMemo(() => weekKeys(weekStart), [weekStart]);
+  const allDays = days;
   const [activeId, setActiveId] = useState(null);
   const snapshot = useRef(null);
   const tasks = useMemo(
@@ -151,13 +185,9 @@ export default function Board({
     return m;
   }, [tasks, allDays, settings.sort]);
 
-  // hidden weekdays (e.g. weekends) only disappear while they have nothing planned
-  const hidden = settings.hiddenDays || [];
-  const days = allDays.filter((d) => !hidden.includes(fromKey(d).getDay()) || byDate[d].length > 0);
-
   const doneByDate = useMemo(() => {
     const m = {};
-    for (const t of done) if (!filter || t.categoryId === filter) m[t.date] = (m[t.date] || 0) + 1;
+    for (const t of done) if (!filter || t.categoryId === filter) (m[t.date] ||= []).push(t);
     return m;
   }, [done, filter]);
 
@@ -250,7 +280,7 @@ export default function Board({
     const original = snap.find((t) => t.id === aid);
     if (droppedZone) {
       setTasks(snap);
-      onMoveWeek(original, droppedZone === 'next' ? 7 : -7);
+      onMoveWeek(original, droppedZone === 'next' ? zoneStep : -zoneStep);
       return;
     }
     if (!over) { setTasks(snap); return; }
@@ -269,6 +299,7 @@ export default function Board({
     const before = snap.filter((t) => t.date === at.date && (!filter || t.categoryId === filter)).sort(byPos).map((t) => t.id);
     if (original.date === at.date && before.join() === ids.join()) { setTasks(snap); return; }
     onReorder(at.date, ids);
+    if (original.date !== at.date) buddyBus.emit(at.date > original.date ? 'lazy' : 'early');
   };
 
   const handleDragCancel = () => {
@@ -286,7 +317,10 @@ export default function Board({
   const onTouchEnd = (e) => {
     const start = touch.current;
     touch.current = null;
-    if (!start || activeId) return;
+    if (!start || activeId || single) return;
+    // on phones the columns themselves scroll sideways, so a swipe moves between days, not weeks
+    const el = scroller.current;
+    if (el && el.scrollWidth > el.clientWidth + 4) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
@@ -311,14 +345,13 @@ export default function Board({
     updateEdges();
     window.addEventListener('resize', updateEdges);
     return () => window.removeEventListener('resize', updateEdges);
-  }, [weekStart, updateEdges, days.length]);
+  }, [days, updateEdges]);
   const scrollBy = (dir) => {
     const el = scroller.current;
     const col = el?.querySelector('.day');
     if (el && col) el.scrollBy({ left: dir * (col.offsetWidth + 16) * 2, behavior: 'smooth' });
   };
 
-  const today = todayKey();
   return (
     <DndContext
       sensors={sensors}
@@ -328,29 +361,15 @@ export default function Board({
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <nav className="day-strip" aria-label="Günlər" style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}>
-        {days.map((d) => (
-          <button
-            key={d}
-            className={`strip-day${d === today ? ' today' : ''}`}
-            onClick={() => document.getElementById(`day-${d}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-          >
-            <span>{dayShort(d)}</span>
-            <b>{fromKey(d).getDate()}</b>
-            <i className={byDate[d].length ? 'dot' : 'dot empty'} />
-          </button>
-        ))}
-      </nav>
-
       <div className={`board-wrap${edges.left ? ' fade-l' : ''}${edges.right ? ' fade-r' : ''}`}>
       {edges.left && (
-        <button className="scroll-arrow left" aria-label="Sola" onClick={() => scrollBy(-1)}><IconChevron dir="left" /></button>
+        <button className="scroll-arrow left" aria-label={tr('Sola', 'Left')} onClick={() => scrollBy(-1)}><IconChevron dir="left" /></button>
       )}
       <div
-        key={weekStart.getTime()}
+        key={days[0]}
         ref={scroller}
         onScroll={updateEdges}
-        className={`board${slide ? ` slide-${slide}` : ''}${activeId ? ' dragging' : ''}`}
+        className={`board${single ? ' single' : ''}${slide ? ` slide-${slide}` : ''}${activeId ? ' dragging' : ''}`}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -359,22 +378,23 @@ export default function Board({
             key={d}
             date={d}
             tasks={byDate[d]}
-            doneCount={doneByDate[d] || 0}
+            doneTasks={doneByDate[d] || []}
             highlight={activeTask?.date === d}
             category={filter ?? defaultCategory}
             onAdd={onAdd}
             onOpen={onOpen}
             onComplete={onComplete}
+            onRestore={onRestore}
           />
         ))}
       </div>
       {edges.right && (
-        <button className="scroll-arrow right" aria-label="Sağa" onClick={() => scrollBy(1)}><IconChevron /></button>
+        <button className="scroll-arrow right" aria-label={tr('Sağa', 'Right')} onClick={() => scrollBy(1)}><IconChevron /></button>
       )}
       </div>
 
-      <WeekZone side="prev" visible={!!activeId} over={zone === 'prev'} />
-      <WeekZone side="next" visible={!!activeId} over={zone === 'next'} />
+      <WeekZone side="prev" step={zoneStep} visible={!!activeId} over={zone === 'prev'} />
+      <WeekZone side="next" step={zoneStep} visible={!!activeId} over={zone === 'next'} />
 
       <DragOverlay dropAnimation={{ duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' }}>
         {activeTask ? <TaskCard task={activeTask} overlay /> : null}

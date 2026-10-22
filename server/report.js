@@ -4,15 +4,17 @@ const COLOR_HEX = {
   blue: 'FF3E83F8', green: 'FF30A46C', orange: 'FFF18A2B', pink: 'FFE5487F', purple: 'FF8E4EC6', gray: 'FF8B8D98',
   red: 'FFE5484D', teal: 'FF12A594', yellow: 'FFD4A106', indigo: 'FF5B5BD6',
 };
-const catName = (t) => (t.category_name ? `${t.category_emoji ? `${t.category_emoji} ` : ''}${t.category_name}` : 'Kateqoriyasız');
-const PRIORITY = ['', 'Aşağı', 'Orta', 'Yüksək'];
+const PRIORITY = { az: ['', 'Aşağı', 'Orta', 'Yüksək'], en: ['', 'Low', 'Medium', 'High'] };
 const PRIORITY_HEX = ['', 'FF8B8D98', 'FFD97706', 'FFE5484D'];
 const subtaskText = (t) => {
   let list = [];
   try { list = JSON.parse(t.subtasks || '[]'); } catch { /* ignore */ }
   return list.length ? `${list.filter((x) => x.done).length}/${list.length}` : '';
 };
-const WEEKDAYS = ['Bazar', 'Bazar ertəsi', 'Çərşənbə axşamı', 'Çərşənbə', 'Cümə axşamı', 'Cümə', 'Şənbə'];
+const WEEKDAYS = {
+  az: ['Bazar', 'Bazar ertəsi', 'Çərşənbə axşamı', 'Çərşənbə', 'Cümə axşamı', 'Cümə', 'Şənbə'],
+  en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+};
 
 // "YYYY-MM-DD" → Date (UTC midnight), so Excel shows the plain calendar date
 const keyToDate = (key) => {
@@ -51,10 +53,15 @@ function borderAll(sheet) {
  * @param {object} opts.user
  * @param {number} opts.tz     client's getTimezoneOffset() in minutes
  * @param {string} opts.today  client's local "YYYY-MM-DD"
+ * @param {string} opts.lang   'en' | 'az'
  */
-export async function buildReport({ tasks, title, period, user, tz, today }) {
+export async function buildReport({ tasks, title, period, user, tz, today, lang = 'en' }) {
+  const L = (az, en) => (lang === 'az' ? az : en);
+  const weekdays = WEEKDAYS[lang] || WEEKDAYS.en;
+  const priorities = PRIORITY[lang] || PRIORITY.en;
+  const catName = (t) => (t.category_name ? `${t.category_emoji ? `${t.category_emoji} ` : ''}${t.category_name}` : L('Kateqoriyasız', 'No category'));
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Task Panel';
+  wb.creator = 'Plan it!';
   wb.created = new Date();
 
   const done = tasks.filter((t) => t.done);
@@ -63,7 +70,7 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
   const rate = tasks.length ? done.length / tasks.length : 0;
 
   // ---------- Sheet 1: summary ----------
-  const s = wb.addWorksheet('Xülasə', { views: [{ showGridLines: false }] });
+  const s = wb.addWorksheet(L('Xülasə', 'Summary'), { views: [{ showGridLines: false }] });
   s.columns = [{ width: 30 }, { width: 22 }, { width: 18 }, { width: 18 }];
 
   s.mergeCells('A1:D1');
@@ -75,17 +82,17 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
   s.getCell('A2').font = { color: { argb: 'FF6B7190' } };
 
   const kpis = [
-    ['Ümumi tapşırıq', tasks.length],
-    ['Tamamlanan', done.length],
-    ['Gözləyən', pending.length],
-    ['Gecikmiş (keçmiş tarixli, bitməmiş)', overdue.length],
-    ['Tamamlanma faizi', rate],
+    [L('Ümumi tapşırıq', 'Total tasks'), tasks.length],
+    [L('Tamamlanan', 'Done'), done.length],
+    [L('Gözləyən', 'Pending'), pending.length],
+    [L('Gecikmiş (keçmiş tarixli, bitməmiş)', 'Overdue (past date, not done)'), overdue.length],
+    [L('Tamamlanma faizi', 'Completion rate'), rate, '0%'],
   ];
   s.addRow([]);
-  styleHeader(s.addRow(['Göstərici', 'Dəyər']));
-  for (const [k, v] of kpis) {
+  styleHeader(s.addRow([L('Göstərici', 'Metric'), L('Dəyər', 'Value')]));
+  for (const [k, v, fmt] of kpis) {
     const r = s.addRow([k, v]);
-    if (k === 'Tamamlanma faizi') r.getCell(2).numFmt = '0%';
+    if (fmt) r.getCell(2).numFmt = fmt;
     r.getCell(2).font = { bold: true };
     r.getCell(2).alignment = { horizontal: 'right' };
   }
@@ -99,11 +106,11 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
     byDay.set(t.date, e);
   }
   s.addRow([]);
-  styleHeader(s.addRow(['Gün', 'Tarix', 'Tapşırıq', 'Tamamlanan']));
+  styleHeader(s.addRow([L('Gün', 'Day'), L('Tarix', 'Date'), L('Tapşırıq', 'Tasks'), L('Tamamlanan', 'Done')]));
   for (const key of [...byDay.keys()].sort()) {
     const d = keyToDate(key);
     const e = byDay.get(key);
-    const r = s.addRow([WEEKDAYS[d.getUTCDay()], d, e.total, e.done]);
+    const r = s.addRow([weekdays[d.getUTCDay()], d, e.total, e.done]);
     r.getCell(2).numFmt = 'dd.mm.yyyy';
   }
 
@@ -116,7 +123,7 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
     byColor.set(catName(t), e);
   }
   s.addRow([]);
-  styleHeader(s.addRow(['Kateqoriya', 'Tapşırıq', 'Tamamlanan', 'Faiz']));
+  styleHeader(s.addRow([L('Kateqoriya', 'Category'), L('Tapşırıq', 'Tasks'), L('Tamamlanan', 'Done'), L('Faiz', 'Rate')]));
   for (const [name, e] of byColor) {
     const r = s.addRow([name, e.total, e.done, e.total ? e.done / e.total : 0]);
     r.getCell(1).font = { bold: true, color: { argb: COLOR_HEX[e.color] || 'FF1C2033' } };
@@ -128,30 +135,30 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
     const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
     ws.columns = [
       { header: '№', key: 'n', width: 6 },
-      { header: 'Tapşırıq', key: 'title', width: 42 },
-      { header: 'Qeyd', key: 'note', width: 40 },
-      { header: 'Planlanan gün', key: 'weekday', width: 18 },
-      { header: 'Planlanan tarix', key: 'date', width: 16 },
-      { header: 'Vaxt', key: 'time', width: 9 },
-      { header: 'Prioritet', key: 'priority', width: 11 },
-      { header: 'Alt-tapşırıq', key: 'subtasks', width: 12 },
-      { header: 'Təkrar', key: 'recur', width: 9 },
+      { header: L('Tapşırıq', 'Task'), key: 'title', width: 42 },
+      { header: L('Qeyd', 'Note'), key: 'note', width: 40 },
+      { header: L('Planlanan gün', 'Planned day'), key: 'weekday', width: 18 },
+      { header: L('Planlanan tarix', 'Planned date'), key: 'date', width: 16 },
+      { header: L('Vaxt', 'Time'), key: 'time', width: 9 },
+      { header: L('Prioritet', 'Priority'), key: 'priority', width: 11 },
+      { header: L('Alt-tapşırıq', 'Subtasks'), key: 'subtasks', width: 12 },
+      { header: L('Təkrar', 'Repeats'), key: 'recur', width: 9 },
       { header: 'Status', key: 'status', width: 16 },
-      { header: 'Tamamlanma vaxtı', key: 'doneAt', width: 20 },
-      { header: 'Kateqoriya', key: 'color', width: 14 },
+      { header: L('Tamamlanma vaxtı', 'Done at'), key: 'doneAt', width: 20 },
+      { header: L('Kateqoriya', 'Category'), key: 'color', width: 14 },
     ];
     styleHeader(ws.getRow(1));
     rows.forEach((t, i) => {
       const d = keyToDate(t.date);
-      const status = t.done ? 'Tamamlanıb' : t.date < today ? 'Gecikib' : 'Gözləyir';
+      const status = t.done ? L('Tamamlanıb', 'Done') : t.date < today ? L('Gecikib', 'Overdue') : L('Gözləyir', 'Pending');
       const r = ws.addRow({
         n: i + 1,
         title: t.title,
         note: t.note || '',
-        weekday: WEEKDAYS[d.getUTCDay()],
+        weekday: weekdays[d.getUTCDay()],
         date: d,
         time: t.time || '',
-        priority: PRIORITY[t.priority] || '',
+        priority: priorities[t.priority] || '',
         subtasks: subtaskText(t),
         recur: t.recur_id ? '🔁' : '',
         status,
@@ -172,9 +179,9 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
     return ws;
   };
 
-  sheetTasks('Bütün tapşırıqlar', tasks);
-  sheetTasks('Tamamlananlar', [...done].sort((a, b) => (b.done_at || '').localeCompare(a.done_at || '')));
-  sheetTasks('Gözləyənlər', pending);
+  sheetTasks(L('Bütün tapşırıqlar', 'All tasks'), tasks);
+  sheetTasks(L('Tamamlananlar', 'Done'), [...done].sort((a, b) => (b.done_at || '').localeCompare(a.done_at || '')));
+  sheetTasks(L('Gözləyənlər', 'Pending'), pending);
 
   // ---------- Sheet: monthly (useful for all-time) ----------
   if (done.length) {
@@ -183,8 +190,8 @@ export async function buildReport({ tasks, title, period, user, tz, today }) {
       const m = localKey(t.done_at || `${t.date}T12:00:00Z`, tz).slice(0, 7);
       byMonth.set(m, (byMonth.get(m) || 0) + 1);
     }
-    const ws = wb.addWorksheet('Aylıq');
-    ws.columns = [{ header: 'Ay', key: 'm', width: 14 }, { header: 'Tamamlanan', key: 'c', width: 14 }];
+    const ws = wb.addWorksheet(L('Aylıq', 'Monthly'));
+    ws.columns = [{ header: L('Ay', 'Month'), key: 'm', width: 14 }, { header: L('Tamamlanan', 'Done'), key: 'c', width: 14 }];
     styleHeader(ws.getRow(1));
     for (const m of [...byMonth.keys()].sort()) ws.addRow({ m, c: byMonth.get(m) });
     borderAll(ws);

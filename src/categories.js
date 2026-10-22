@@ -1,17 +1,19 @@
 import { createContext, useContext } from 'react';
+import { tr } from './i18n';
 
 // Colours a category can use (matches server PALETTE)
+const colour = (id, az, en) => ({ id, get name() { return tr(az, en); } });
 export const PALETTE = [
-  { id: 'blue', name: 'Göy' },
-  { id: 'orange', name: 'Narıncı' },
-  { id: 'green', name: 'Yaşıl' },
-  { id: 'pink', name: 'Çəhrayı' },
-  { id: 'purple', name: 'Bənövşəyi' },
-  { id: 'gray', name: 'Boz' },
-  { id: 'red', name: 'Qırmızı' },
-  { id: 'teal', name: 'Firuzəyi' },
-  { id: 'yellow', name: 'Sarı' },
-  { id: 'indigo', name: 'İndiqo' },
+  colour('blue', 'Göy', 'Blue'),
+  colour('orange', 'Narıncı', 'Orange'),
+  colour('green', 'Yaşıl', 'Green'),
+  colour('pink', 'Çəhrayı', 'Pink'),
+  colour('purple', 'Bənövşəyi', 'Purple'),
+  colour('gray', 'Boz', 'Grey'),
+  colour('red', 'Qırmızı', 'Red'),
+  colour('teal', 'Firuzəyi', 'Teal'),
+  colour('yellow', 'Sarı', 'Yellow'),
+  colour('indigo', 'İndiqo', 'Indigo'),
 ];
 
 export const CategoriesContext = createContext({ list: [], byId: new Map() });

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { addDays, doneKey, formatDay, relativeDayLabel, startOfWeek, toKey, todayKey } from '../dates';
 import { streak } from './stats';
 import { useCategories } from '../categories';
+import { tr } from '../i18n';
 
 export default function DonePage({ done, onRestore, onDelete }) {
   const [q, setQ] = useState('');
@@ -50,35 +51,35 @@ export default function DonePage({ done, onRestore, onDelete }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Tamamlananlar</h1>
-          <p className="muted">Gördüyün işlər burada toplanır 💪</p>
+          <h1>{tr('Tamamlananlar', 'Done')}</h1>
+          <p className="muted">{tr('Gördüyün işlər burada toplanır 💪', 'Everything you get done lands here 💪')}</p>
         </div>
       </div>
 
       <div className="stats">
-        <div className="stat"><span>Bu gün</span><b>{stats.today}</b></div>
-        <div className="stat"><span>Bu həftə</span><b>{stats.week}</b></div>
-        <div className="stat"><span>Ümumi</span><b>{stats.total}</b></div>
-        <div className="stat accent"><span>Ardıcıl gün</span><b>{stats.streak} 🔥</b></div>
+        <div className="stat"><span>{tr('Bu gün', 'Today')}</span><b>{stats.today}</b></div>
+        <div className="stat"><span>{tr('Bu həftə', 'This week')}</span><b>{stats.week}</b></div>
+        <div className="stat"><span>{tr('Ümumi', 'Total')}</span><b>{stats.total}</b></div>
+        <div className="stat accent"><span>{tr('Ardıcıl gün', 'Day streak')}</span><b>{stats.streak} 🔥</b></div>
       </div>
 
       {done.length > 0 && (
         <div className="done-filters">
-          <input className="search" placeholder="Axtar…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="search" placeholder={tr('Axtar…', 'Search…')} value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="seg-small">
-            {[['all', 'Hamısı'], ['week', 'Bu həftə'], ['month', 'Bu ay'], ['range', 'Aralıq']].map(([id, name]) => (
+            {[['all', tr('Hamısı', 'All')], ['week', tr('Bu həftə', 'This week')], ['month', tr('Bu ay', 'This month')], ['range', tr('Aralıq', 'Range')]].map(([id, name]) => (
               <button key={id} type="button" className={period === id ? 'sel' : ''} onClick={() => setPeriod(id)}>{name}</button>
             ))}
           </div>
           {period === 'range' && (
             <div className="range-row">
-              <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} aria-label="Başlanğıc" />
+              <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} aria-label={tr('Başlanğıc', 'From')} />
               <span className="muted">—</span>
-              <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} aria-label="Son" />
+              <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} aria-label={tr('Son', 'To')} />
             </div>
           )}
           <div className="filter-cats">
-            <button className={`mini-cat${!cat ? ' sel' : ''}`} onClick={() => setCat(null)}>Bütün kateqoriyalar</button>
+            <button className={`mini-cat${!cat ? ' sel' : ''}`} onClick={() => setCat(null)}>{tr('Bütün kateqoriyalar', 'All categories')}</button>
             {categories.map((c) => (
               <button key={c.id} className={`mini-cat${cat === c.id ? ' sel' : ''}`} onClick={() => setCat(cat === c.id ? null : c.id)}>
                 <i className={`dot-c c-${c.color}`} />{c.emoji && `${c.emoji} `}{c.name}
@@ -87,7 +88,7 @@ export default function DonePage({ done, onRestore, onDelete }) {
           </div>
           {filtered && (
             <p className="muted small">
-              {shown} nəticə · <button className="link-btn" onClick={() => { setQ(''); setCat(null); setPeriod('all'); }}>Filtrləri sıfırla</button>
+              {tr(`${shown} nəticə`, `${shown} result${shown === 1 ? '' : 's'}`)} · <button className="link-btn" onClick={() => { setQ(''); setCat(null); setPeriod('all'); }}>{tr('Filtrləri sıfırla', 'Reset filters')}</button>
             </p>
           )}
         </div>
@@ -96,8 +97,8 @@ export default function DonePage({ done, onRestore, onDelete }) {
       {done.length === 0 && (
         <div className="empty-state">
           <div className="empty-icon">✓</div>
-          <h3>Hələ tamamlanan tapşırıq yoxdur</h3>
-          <p className="muted">Həftə görünüşündə tapşırığın yanındakı dairəyə toxun — o buraya düşəcək.</p>
+          <h3>{tr('Hələ tamamlanan tapşırıq yoxdur', 'Nothing done yet')}</h3>
+          <p className="muted">{tr('Tapşırığın yanındakı dairəyə toxun — o buraya düşəcək.', 'Tap the circle next to a task — it will land here.')}</p>
         </div>
       )}
 
@@ -107,28 +108,28 @@ export default function DonePage({ done, onRestore, onDelete }) {
           <ul>
             {items.map((t) => (
               <li key={t.id} className="done-item">
-                <button className="check checked" title="Geri qaytar" aria-label="Geri qaytar" onClick={() => onRestore(t)}>
+                <button className="check checked" title={tr('Geri qaytar', 'Restore')} aria-label={tr('Geri qaytar', 'Restore')} onClick={() => onRestore(t)}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
                 </button>
                 <div className="done-main">
                   <div className="done-title">{t.title}</div>
                   <div className="done-sub">
                     {byId.get(t.categoryId) && <span className="done-cat"><i className={`dot-c c-${byId.get(t.categoryId).color}`} />{byId.get(t.categoryId).name}</span>}
-                    Planlanmışdı: {formatDay(t.date)}
-                    {t.date < doneKey(t) && <span className="tag late">gecikmə ilə</span>}
-                    {t.date > doneKey(t) && <span className="tag early">vaxtından əvvəl</span>}
+                    {tr('Planlanmışdı', 'Planned for')}: {formatDay(t.date)}
+                    {t.date < doneKey(t) && <span className="tag late">{tr('gecikmə ilə', 'late')}</span>}
+                    {t.date > doneKey(t) && <span className="tag early">{tr('vaxtından əvvəl', 'early')}</span>}
                   </div>
                 </div>
                 <div className="done-actions">
-                  <button className="icon-btn sm" title="Geri qaytar" onClick={() => onRestore(t)}>↩</button>
-                  <button className="icon-btn sm danger" title="Sil" onClick={() => onDelete(t)}>🗑</button>
+                  <button className="icon-btn sm" title={tr('Geri qaytar', 'Restore')} onClick={() => onRestore(t)}>↩</button>
+                  <button className="icon-btn sm danger" title={tr('Sil', 'Delete')} onClick={() => onDelete(t)}>🗑</button>
                 </div>
               </li>
             ))}
           </ul>
         </section>
       ))}
-      {filtered && done.length > 0 && groups.length === 0 && <p className="muted center">Heç nə tapılmadı.</p>}
+      {filtered && done.length > 0 && groups.length === 0 && <p className="muted center">{tr('Heç nə tapılmadı.', 'Nothing found.')}</p>}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { isProjection } from '../settings';
 import { useCategories } from '../categories';
 import Folder from './Folder';
 import { streak } from './stats';
+import { tr } from '../i18n';
 
 function Bars({ data, max }) {
   return (
@@ -75,7 +76,7 @@ export default function ReportsPage({ tasks, done }) {
       const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
       const prefix = toKey(d).slice(0, 7);
       const v = done.filter((t) => doneKey(t).startsWith(prefix)).length;
-      return { key: prefix, label: MONTHS_SHORT[d.getMonth()], value: v, title: `${v} tamamlanıb` };
+      return { key: prefix, label: MONTHS_SHORT[d.getMonth()], value: v, title: tr(`${v} tamamlanıb`, `${v} done`) };
     });
 
     const first = all.length ? all.reduce((m, t) => (t.date < m ? t.date : m), all[0].date) : null;
@@ -107,10 +108,10 @@ export default function ReportsPage({ tasks, done }) {
     return { total: list.length, done: d, rate: list.length ? Math.round((d / list.length) * 100) : 0 };
   }, [all, from, to, cats]);
   const presets = [
-    ['Bu ay', toKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), today],
-    ['Son 30 gün', toKey(addDays(new Date(), -29)), today],
-    ['Son 3 ay', toKey(addDays(new Date(), -90)), today],
-    ['Bu il', `${new Date().getFullYear()}-01-01`, today],
+    [tr('Bu ay', 'This month'), toKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), today],
+    [tr('Son 30 gün', 'Last 30 days'), toKey(addDays(new Date(), -29)), today],
+    [tr('Son 3 ay', 'Last 3 months'), toKey(addDays(new Date(), -90)), today],
+    [tr('Bu il', 'This year'), `${new Date().getFullYear()}-01-01`, today],
   ];
   const customHref = api.reportUrl({ scope: 'custom', from, to, categories: cats.join(','), today });
 
@@ -121,8 +122,8 @@ export default function ReportsPage({ tasks, done }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Hesabat</h1>
-          <p className="muted">Həftəlik və ümumi nəticələr. Excel faylı kimi yüklə.</p>
+          <h1>{tr('Hesabat', 'Reports')}</h1>
+          <p className="muted">{tr('Həftəlik və ümumi nəticələr. Excel faylı kimi yüklə.', 'Weekly and all-time results. Download them as Excel.')}</p>
         </div>
       </div>
 
@@ -130,27 +131,27 @@ export default function ReportsPage({ tasks, done }) {
       <section className="report-card">
         <div className="report-head">
           <div>
-            <h2>Həftəlik hesabat</h2>
+            <h2>{tr('Həftəlik hesabat', 'Weekly report')}</h2>
             <div className="week-picker">
-              <button className="icon-btn sm" aria-label="Əvvəlki həftə" onClick={() => setWeekStart((w) => addDays(w, -7))}>‹</button>
+              <button className="icon-btn sm" aria-label={tr('Əvvəlki həftə', 'Previous week')} onClick={() => setWeekStart((w) => addDays(w, -7))}>‹</button>
               <span><b>{weekLabel(weekStart)}</b> · {formatRange(weekStart)}</span>
-              <button className="icon-btn sm" aria-label="Növbəti həftə" onClick={() => setWeekStart((w) => addDays(w, 7))}>›</button>
+              <button className="icon-btn sm" aria-label={tr('Növbəti həftə', 'Next week')} onClick={() => setWeekStart((w) => addDays(w, 7))}>›</button>
             </div>
           </div>
-          <Download href={weekHref}>Həftəlik Excel</Download>
+          <Download href={weekHref}>{tr('Həftəlik Excel', 'Weekly Excel')}</Download>
         </div>
 
         <div className="stats">
-          <div className="stat"><span>Planlanan</span><b>{week.total}</b></div>
-          <div className="stat"><span>Tamamlanan</span><b className="ok">{week.done}</b></div>
-          <div className="stat"><span>Qalan</span><b>{week.pending}</b>{week.overdue > 0 && <small className="warn">{week.overdue} gecikib</small>}</div>
-          <div className="stat accent"><span>Nəticə</span><b>{week.rate}%</b></div>
+          <div className="stat"><span>{tr('Planlanan', 'Planned')}</span><b>{week.total}</b></div>
+          <div className="stat"><span>{tr('Tamamlanan', 'Done')}</span><b className="ok">{week.done}</b></div>
+          <div className="stat"><span>{tr('Qalan', 'Left')}</span><b>{week.pending}</b>{week.overdue > 0 && <small className="warn">{week.overdue} {tr('gecikib', 'overdue')}</small>}</div>
+          <div className="stat accent"><span>{tr('Nəticə', 'Score')}</span><b>{week.rate}%</b></div>
         </div>
 
         <div className="chart-card">
           <div className="chart-legend">
-            <span><i className="lg planned" /> Planlanan</span>
-            <span><i className="lg done" /> Tamamlanan</span>
+            <span><i className="lg planned" /> {tr('Planlanan', 'Planned')}</span>
+            <span><i className="lg done" /> {tr('Tamamlanan', 'Done')}</span>
           </div>
           <Bars data={week.perDay} max={week.max} />
         </div>
@@ -160,43 +161,43 @@ export default function ReportsPage({ tasks, done }) {
       <section className="report-card">
         <div className="report-head">
           <div>
-            <h2>Ümumi hesabat <span className="muted">(bütün dövr)</span></h2>
-            <p className="muted small">Başlanğıcdan bu günə qədər bütün tapşırıqlar</p>
+            <h2>{tr('Ümumi hesabat', 'All-time report')} <span className="muted">{tr('(bütün dövr)', '(all time)')}</span></h2>
+            <p className="muted small">{tr('Başlanğıcdan bu günə qədər bütün tapşırıqlar', 'Every task from the start until today')}</p>
           </div>
-          <Download href={allHref}>Ümumi Excel</Download>
+          <Download href={allHref}>{tr('Ümumi Excel', 'All-time Excel')}</Download>
         </div>
 
         <div className="stats">
-          <div className="stat"><span>Ümumi tapşırıq</span><b>{allTime.total}</b></div>
-          <div className="stat"><span>Tamamlanan</span><b className="ok">{allTime.done}</b></div>
-          <div className="stat"><span>Həftədə orta</span><b>{allTime.perWeek}</b></div>
-          <div className="stat accent"><span>Tamamlanma</span><b>{allTime.rate}%</b></div>
+          <div className="stat"><span>{tr('Ümumi tapşırıq', 'Total tasks')}</span><b>{allTime.total}</b></div>
+          <div className="stat"><span>{tr('Tamamlanan', 'Done')}</span><b className="ok">{allTime.done}</b></div>
+          <div className="stat"><span>{tr('Həftədə orta', 'Weekly average')}</span><b>{allTime.perWeek}</b></div>
+          <div className="stat accent"><span>{tr('Tamamlanma', 'Completion')}</span><b>{allTime.rate}%</b></div>
         </div>
 
         <div className="report-grid">
           <div className="chart-card">
-            <h3>Son 6 ay — tamamlanan</h3>
+            <h3>{tr('Son 6 ay — tamamlanan', 'Last 6 months — done')}</h3>
             <Bars data={allTime.months} max={allTime.maxMonth} />
           </div>
           <div className="chart-card">
-            <h3>Qısa faktlar</h3>
+            <h3>{tr('Qısa faktlar', 'Quick facts')}</h3>
             <div className="mini-facts">
-              <div><span>Ən məhsuldar gün</span><b>{allTime.best ? `${allTime.best.k.split('-').reverse().join('.')} · ${allTime.best.v} tapşırıq` : '—'}</b></div>
-              <div><span>Ardıcıl gün</span><b>{allTime.streak} 🔥</b></div>
-              <div><span>Gözləyən tapşırıq</span><b>{allTime.pending}</b></div>
+              <div><span>{tr('Ən məhsuldar gün', 'Most productive day')}</span><b>{allTime.best ? `${allTime.best.k.split('-').reverse().join('.')} · ${allTime.best.v} ${tr('tapşırıq', allTime.best.v === 1 ? 'task' : 'tasks')}` : '—'}</b></div>
+              <div><span>{tr('Ardıcıl gün', 'Day streak')}</span><b>{allTime.streak} 🔥</b></div>
+              <div><span>{tr('Gözləyən tapşırıq', 'Pending tasks')}</span><b>{allTime.pending}</b></div>
             </div>
           </div>
         </div>
 
         <div className="folders-section">
-          <h3>Kateqoriyalar üzrə</h3>
-          {allTime.colors.length === 0 && <p className="muted small">Hələ məlumat yoxdur.</p>}
+          <h3>{tr('Kateqoriyalar üzrə', 'By category')}</h3>
+          {allTime.colors.length === 0 && <p className="muted small">{tr('Hələ məlumat yoxdur.', 'No data yet.')}</p>}
           <div className="folder-grid">
             {allTime.colors.map((c) => (
               <div className="folder-tile" key={c.id}>
                 <Folder color={c.color} name={c.name} emoji={c.emoji} size={64} />
                 <b>{c.name}</b>
-                <span className="muted small">{c.done}/{c.total} tamamlanıb</span>
+                <span className="muted small">{c.done}/{c.total} {tr('tamamlanıb', 'done')}</span>
                 <div className="cl-track"><div className={`cl-fill c-${c.color}`} style={{ width: `${(c.done / c.total) * 100}%` }} /></div>
               </div>
             ))}
@@ -208,19 +209,19 @@ export default function ReportsPage({ tasks, done }) {
       <section className="report-card">
         <div className="report-head">
           <div>
-            <h2>Fərdi hesabat</h2>
-            <p className="muted small">İstədiyin tarix aralığını və kateqoriyaları seç</p>
+            <h2>{tr('Fərdi hesabat', 'Custom report')}</h2>
+            <p className="muted small">{tr('İstədiyin tarix aralığını və kateqoriyaları seç', 'Pick any date range and categories')}</p>
           </div>
-          <Download href={customHref}>Fərdi Excel</Download>
+          <Download href={customHref}>{tr('Fərdi Excel', 'Custom Excel')}</Download>
         </div>
 
         <div className="custom-grid">
           <div className="field">
-            <label>Tarix aralığı</label>
+            <label>{tr('Tarix aralığı', 'Date range')}</label>
             <div className="range-row">
-              <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="Başlanğıc" />
+              <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label={tr('Başlanğıc', 'From')} />
               <span className="muted">—</span>
-              <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="Son" />
+              <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label={tr('Son', 'To')} />
             </div>
             <div className="date-row">
               {presets.map(([label, a, b]) => (
@@ -231,7 +232,7 @@ export default function ReportsPage({ tasks, done }) {
             </div>
           </div>
           <div className="field">
-            <label>Kateqoriyalar {cats.length === 0 && <span className="muted">· hamısı</span>}</label>
+            <label>{tr('Kateqoriyalar', 'Categories')} {cats.length === 0 && <span className="muted">· {tr('hamısı', 'all')}</span>}</label>
             <div className="filter-cats">
               {categories.map((c) => (
                 <button
@@ -247,9 +248,9 @@ export default function ReportsPage({ tasks, done }) {
         </div>
 
         <div className="stats three">
-          <div className="stat"><span>Tapşırıq</span><b>{custom.total}</b></div>
-          <div className="stat"><span>Tamamlanan</span><b className="ok">{custom.done}</b></div>
-          <div className="stat accent"><span>Nəticə</span><b>{custom.rate}%</b></div>
+          <div className="stat"><span>{tr('Tapşırıq', 'Tasks')}</span><b>{custom.total}</b></div>
+          <div className="stat"><span>{tr('Tamamlanan', 'Done')}</span><b className="ok">{custom.done}</b></div>
+          <div className="stat accent"><span>{tr('Nəticə', 'Score')}</span><b>{custom.rate}%</b></div>
         </div>
       </section>
     </div>

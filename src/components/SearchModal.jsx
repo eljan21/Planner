@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useCategories } from '../categories';
 import { addDays, formatDay, formatRange, fromKey, startOfWeek, toKey, todayKey } from '../dates';
 import { IconSearch } from './Icons';
+import { tr } from '../i18n';
 
 export default function SearchModal({ tasks, done, notes, onClose, onPick, onPickNote }) {
   const [q, setQ] = useState('');
@@ -43,25 +44,25 @@ export default function SearchModal({ tasks, done, notes, onClose, onPick, onPic
 
   return (
     <div className="backdrop top" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="search-modal" role="dialog" aria-label="Axtar">
+      <div className="search-modal" role="dialog" aria-label={tr('Axtar', 'Search')}>
         <div className="search-input">
           <IconSearch />
-          <input autoFocus placeholder="Tapşırıq və ya not axtar…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
+          <input autoFocus placeholder={tr('Tapşırıq və ya not axtar…', 'Search tasks and notes…')} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
           <kbd>Esc</kbd>
         </div>
         {q && (
           <ul className="search-results">
-            {results.length === 0 && <li className="muted empty-res">Heç nə tapılmadı</li>}
+            {results.length === 0 && <li className="muted empty-res">{tr('Heç nə tapılmadı', 'Nothing found')}</li>}
             {results.map((r, i) => {
               if (r.kind === 'note') {
                 const n = r.item;
-                const firstLine = n.title || n.body.trim().split('\n')[0] || 'Not';
+                const firstLine = n.title || n.body.trim().split('\n')[0] || tr('Not', 'Note');
                 return (
                   <li key={r.key}>
                     <button className={i === sel ? 'sel' : ''} onMouseEnter={() => setSel(i)} onClick={() => pick(r)}>
                       <span className="sr-icon">📝</span>
                       <span className="sr-title">{firstLine}</span>
-                      <span className="sr-meta">Not · {formatRange(startOfWeek(fromKey(n.week)))}</span>
+                      <span className="sr-meta">{tr('Not', 'Note')} · {formatRange(startOfWeek(fromKey(n.week)))}</span>
                     </button>
                   </li>
                 );

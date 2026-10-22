@@ -6,6 +6,7 @@ import {
 import Folder from './Folder';
 import WeekSwitcher from './WeekSwitcher';
 import { IconBell, IconTrash } from './Icons';
+import { getLang, tr } from '../i18n';
 
 const NOTE_COLORS = ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
 
@@ -19,7 +20,7 @@ export function tagsOf(note) {
 const parseDb = (s) => new Date(`${s.replace(' ', 'T')}Z`);
 function stamp(s) {
   const d = parseDb(s);
-  const hm = d.toLocaleTimeString('az', { hour: '2-digit', minute: '2-digit' });
+  const hm = d.toLocaleTimeString(getLang() === 'az' ? 'az' : 'en-GB', { hour: '2-digit', minute: '2-digit' });
   return toKey(d) === todayKey() ? hm : `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}, ${hm}`;
 }
 
@@ -52,7 +53,7 @@ function Composer({ onAdd, nextColor }) {
     <div className="composer">
       <input
         className="composer-title"
-        placeholder="Başlıq (istəyə bağlı)"
+        placeholder={tr('Başlıq (istəyə bağlı)', 'Title (optional)')}
         value={title}
         maxLength={200}
         onChange={(e) => setTitle(e.target.value)}
@@ -60,26 +61,26 @@ function Composer({ onAdd, nextColor }) {
       />
       <AutoText
         className="composer-body"
-        placeholder="Bu həftə üçün qeydini yaz…"
+        placeholder={tr('Bu həftə üçün qeydini yaz…', 'Write a note for this week…')}
         value={body}
         onChange={setBody}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }}
       />
       <div className="composer-foot">
-        <div className="color-dots" role="radiogroup" aria-label="Rəng">
+        <div className="color-dots" role="radiogroup" aria-label={tr('Rəng', 'Colour')}>
           {NOTE_COLORS.map((c, i) => (
             <button
               key={c}
               role="radio"
               aria-checked={c === color}
-              aria-label={`Rəng ${i + 1}`}
+              aria-label={`${tr('Rəng', 'Colour')} ${i + 1}`}
               className={`color-dot p-day${i}${c === color ? ' sel' : ''}`}
               onClick={() => setColor(c)}
             />
           ))}
         </div>
         <span className="muted small hide-sm">⌘ + Enter</span>
-        <button className="btn primary" onClick={submit} disabled={!title.trim() && !body.trim()}>Not əlavə et</button>
+        <button className="btn primary" onClick={submit} disabled={!title.trim() && !body.trim()}>{tr('Not əlavə et', 'Add note')}</button>
       </div>
     </div>
   );
@@ -94,7 +95,7 @@ function ToTaskForm({ weekStart, onCancel, onSubmit }) {
 
   return (
     <div className="to-task">
-      <div className="to-task-label">Hansı günə?</div>
+      <div className="to-task-label">{tr('Hansı günə?', 'Which day?')}</div>
       <div className="day-chips">
         {keys.map((k) => (
           <button
@@ -107,7 +108,7 @@ function ToTaskForm({ weekStart, onCancel, onSubmit }) {
           </button>
         ))}
       </div>
-      <div className="to-task-label">Kateqoriya</div>
+      <div className="to-task-label">{tr('Kateqoriya', 'Category')}</div>
       <div className="mini-cats">
         {list.map((c) => (
           <button key={c.id} className={`mini-cat${c.id === categoryId ? ' sel' : ''}`} onClick={() => setCategoryId(c.id)} title={c.name}>
@@ -117,9 +118,9 @@ function ToTaskForm({ weekStart, onCancel, onSubmit }) {
         ))}
       </div>
       <div className="to-task-foot">
-        <button className="btn sm ghost" onClick={onCancel}>Ləğv et</button>
+        <button className="btn sm ghost" onClick={onCancel}>{tr('Ləğv et', 'Cancel')}</button>
         <button className="btn sm primary" onClick={() => onSubmit({ date, categoryId })}>
-          <IconBell /> {formatDay(date)} — əlavə et
+          <IconBell /> {tr(`${formatDay(date)} — əlavə et`, `Add to ${formatDay(date)}`)}
         </button>
       </div>
     </div>
@@ -147,7 +148,7 @@ function NoteCard({ note, task, weekStart, showWeek, onTag, onUpdate, onDelete, 
         <input
           className="note-title"
           value={title}
-          placeholder="Başlıqsız"
+          placeholder={tr('Başlıqsız', 'Untitled')}
           maxLength={200}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={commit}
@@ -159,7 +160,7 @@ function NoteCard({ note, task, weekStart, showWeek, onTag, onUpdate, onDelete, 
       <AutoText
         className="note-body"
         value={body}
-        placeholder="Qeyd yaz…"
+        placeholder={tr('Qeyd yaz…', 'Write a note…')}
         onChange={setBody}
         onBlur={commit}
       />
@@ -180,23 +181,23 @@ function NoteCard({ note, task, weekStart, showWeek, onTag, onUpdate, onDelete, 
       ) : (
         <footer className="note-foot">
           {task ? (
-            <button className="linked-chip" onClick={() => onShowTask(task)} title="Tapşırığa bax">
-              {task.done ? '✓ Tamamlanıb' : '⏰ Tapşırıq'} · {formatDay(task.date)}
+            <button className="linked-chip" onClick={() => onShowTask(task)} title={tr('Tapşırığa bax', 'Open task')}>
+              {task.done ? tr('✓ Tamamlanıb', '✓ Done') : tr('⏰ Tapşırıq', '⏰ Task')} · {formatDay(task.date)}
             </button>
           ) : (
             <button className="remind-btn" onClick={() => setConverting(true)} disabled={!canConvert}>
-              <IconBell /> Tapşırıq kimi əlavə et
+              <IconBell /> {tr('Tapşırıq kimi əlavə et', 'Add as a task')}
             </button>
           )}
           <div className="note-tools">
             <div className="color-pop">
-              <button className={`color-dot p-day${note.color.slice(1)}`} aria-label="Rəngi dəyiş" onClick={() => setColorOpen((o) => !o)} />
+              <button className={`color-dot p-day${note.color.slice(1)}`} aria-label={tr('Rəngi dəyiş', 'Change colour')} onClick={() => setColorOpen((o) => !o)} />
               {colorOpen && (
                 <div className="color-pop-menu">
                   {NOTE_COLORS.map((c, i) => (
                     <button
                       key={c}
-                      aria-label={`Rəng ${i + 1}`}
+                      aria-label={`${tr('Rəng', 'Colour')} ${i + 1}`}
                       className={`color-dot p-day${i}${c === note.color ? ' sel' : ''}`}
                       onClick={() => { onUpdate(note.id, { color: c }); setColorOpen(false); }}
                     />
@@ -204,7 +205,7 @@ function NoteCard({ note, task, weekStart, showWeek, onTag, onUpdate, onDelete, 
                 </div>
               )}
             </div>
-            <button className="icon-btn sm ghost-icon" aria-label="Notu sil" title="Sil" onClick={() => onDelete(note)}>
+            <button className="icon-btn sm ghost-icon" aria-label={tr('Notu sil', 'Delete note')} title={tr('Sil', 'Delete')} onClick={() => onDelete(note)}>
               <IconTrash />
             </button>
           </div>
@@ -242,17 +243,17 @@ export default function NotesPage({
       <div className="panel-head">
         <div className="week-title">
           <h1>
-            {tag ? `#${tag}` : 'Notlarım'}
-            {tag && <button className="filter-chip" onClick={() => setTag(null)} title="Filtri sil">× filtr</button>}
+            {tag ? `#${tag}` : tr('Notlarım', 'My notes')}
+            {tag && <button className="filter-chip" onClick={() => setTag(null)} title={tr('Filtri sil', 'Clear filter')}>× {tr('filtr', 'filter')}</button>}
           </h1>
-          <span className="muted">{tag ? `Bütün həftələr · ${list.length} not` : `${weekLabel(weekStart)} · ${formatRange(weekStart)}`}</span>
+          <span className="muted">{tag ? tr(`Bütün həftələr · ${list.length} not`, `All weeks · ${list.length} note${list.length === 1 ? '' : 's'}`) : `${weekLabel(weekStart)} · ${formatRange(weekStart)}`}</span>
         </div>
         {!tag && <WeekSwitcher weekStart={weekStart} onShift={onShift} onGo={onGo} onToday={onToday} />}
       </div>
 
       {allTags.length > 0 && (
         <div className="tag-bar">
-          <span className="muted small">Etiketlər:</span>
+          <span className="muted small">{tr('Etiketlər:', 'Tags:')}</span>
           {allTags.map(([t, n]) => (
             <button key={t} className={`tag-chip${tag === t ? ' sel' : ''}`} onClick={() => setTag(tag === t ? null : t)}>
               #{t} <em>{n}</em>
@@ -266,8 +267,8 @@ export default function NotesPage({
       {list.length === 0 ? (
         <div className="empty-state compact">
           <div className="empty-icon">✎</div>
-          <h3>Bu həftə üçün not yoxdur</h3>
-          <p className="muted">Fikirlərini, planlarını yuxarıda yaz. <b>#etiket</b> yazsan, notlar etiketə görə qruplaşar. İstəsən notu bir düymə ilə tapşırığa çevirə bilərsən.</p>
+          <h3>{tr('Bu həftə üçün not yoxdur', 'No notes for this week')}</h3>
+          <p className="muted">{tr('Fikirlərini, planlarını yuxarıda yaz.', 'Write your thoughts and plans above.')} {tr('Yazsan', 'Add a')} <b>#{tr('etiket', 'tag')}</b>{tr(', notlar etiketə görə qruplaşar. İstəsən notu bir düymə ilə tapşırığa çevirə bilərsən.', ' to group notes by it. You can turn any note into a task with one tap.')}</p>
         </div>
       ) : (
         <div className="notes-grid">

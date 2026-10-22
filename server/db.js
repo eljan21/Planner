@@ -88,24 +88,51 @@ addColumn('tasks', 'subtasks', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('tasks', 'recur_id', 'INTEGER REFERENCES recurrences(id) ON DELETE SET NULL');
 addColumn('categories', 'emoji', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'settings', "TEXT NOT NULL DEFAULT '{}'");
+addColumn('tasks', 'deadline', 'TEXT');                          // ISO instant (UTC)
+addColumn('tasks', 'reminders', "TEXT NOT NULL DEFAULT '[]'");   // [{ at: ISO instant, sent: bool }] — sent by the Telegram bot
+addColumn('users', 'telegram_chat_id', 'TEXT');
+addColumn('users', 'telegram_code', 'TEXT');
+addColumn('users', 'friend_code', 'TEXT');
+addColumn('users', 'password_hash', 'TEXT');      // email + password accounts (scrypt)
+addColumn('users', 'totp_secret', 'TEXT');        // authenticator secret, encrypted
+addColumn('users', 'totp_enabled', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'totp_last_step', 'INTEGER');  // last accepted 30-second step — a code works once
+addColumn('users', 'recovery_codes', "TEXT NOT NULL DEFAULT '[]'"); // sha-256 of the unused codes
+addColumn('users', 'device_epoch', 'INTEGER NOT NULL DEFAULT 0');   // bump to forget remembered devices
+addColumn('users', 'avatar', 'BLOB');           // uploaded profile picture (resized in the browser)
+addColumn('users', 'avatar_type', 'TEXT');
+addColumn('users', 'avatar_v', 'INTEGER');      // changes on every upload, busts the browser cache
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_friend_code ON users(friend_code)');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS friendships (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    addressee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL DEFAULT 'pending',   -- pending | accepted
+    created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+    accepted_at  TEXT,
+    UNIQUE (requester_id, addressee_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_friend_addressee ON friendships(addressee_id, status);
+`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(category_id)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_recur ON tasks(recur_id)');
 
 export const PALETTE = ['blue', 'orange', 'green', 'pink', 'purple', 'gray', 'red', 'teal', 'yellow', 'indigo'];
 
-const DEFAULT_CATEGORIES = [
-  ['Şəxsi', 'blue'], ['İş', 'orange'], ['Sağlamlıq', 'green'],
-  ['Alış-veriş', 'pink'], ['Təhsil', 'purple'], ['Digər', 'gray'],
-];
+const DEFAULT_CATEGORIES = {
+  az: [['Şəxsi', 'blue'], ['İş', 'orange'], ['Sağlamlıq', 'green'], ['Alış-veriş', 'pink'], ['Təhsil', 'purple'], ['Digər', 'gray']],
+  en: [['Personal', 'blue'], ['Work', 'orange'], ['Health', 'green'], ['Shopping', 'pink'], ['Learning', 'purple'], ['Other', 'gray']],
+};
 
 const ensured = new Set();
 /** First visit: create the default categories and attach any legacy tasks (which only had a colour). */
-export function ensureCategories(uid) {
+export function ensureCategories(uid, lang = 'en') {
   if (ensured.has(uid)) return;
   const has = db.prepare('SELECT COUNT(*) AS n FROM categories WHERE user_id = ?').get(uid).n;
   if (!has) {
     const ins = db.prepare('INSERT INTO categories (user_id, name, color, position) VALUES (?, ?, ?, ?)');
-    tx(() => DEFAULT_CATEGORIES.forEach(([name, color], i) => ins.run(uid, name, color, i)));
+    tx(() => (DEFAULT_CATEGORIES[lang] || DEFAULT_CATEGORIES.en).forEach(([name, color], i) => ins.run(uid, name, color, i)));
   }
   const orphans = db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE user_id = ? AND category_id IS NULL').get(uid).n;
   if (orphans) {

@@ -22,7 +22,7 @@ function apply({ theme, accent, density }) {
   el.dataset.theme = resolved;
   el.dataset.accent = accent;
   el.dataset.density = density;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#0a1430' : '#ececef');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'dark' ? '#0d1834' : '#ffffff');
   write('tp_theme', theme);
   write('tp_accent', accent);
   write('tp_density', density);

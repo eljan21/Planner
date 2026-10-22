@@ -1,7 +1,21 @@
-export const DAYS = ['Bazar ertəsi', 'Çərşənbə axşamı', 'Çərşənbə', 'Cümə axşamı', 'Cümə', 'Şənbə', 'Bazar'];
-export const DAYS_SHORT = ['B.e', 'Ç.a', 'Çər', 'C.a', 'Cüm', 'Şən', 'Baz'];
-export const MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'İyun', 'İyul', 'Avqust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'];
-export const MONTHS_SHORT = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'İyn', 'İyl', 'Avq', 'Sen', 'Okt', 'Noy', 'Dek'];
+import { bilingual, tr } from './i18n';
+
+// Monday first. These read as the current language's list.
+export const DAYS = bilingual(
+  ['Bazar ertəsi', 'Çərşənbə axşamı', 'Çərşənbə', 'Cümə axşamı', 'Cümə', 'Şənbə', 'Bazar'],
+  ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+);
+export const DAYS_SHORT = bilingual(['B.e', 'Ç.a', 'Çər', 'C.a', 'Cüm', 'Şən', 'Baz'], ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+export const MONTHS = bilingual(
+  ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'İyun', 'İyul', 'Avqust', 'Sentyabr', 'Oktyabr', 'Noyabr', 'Dekabr'],
+  ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+);
+export const MONTHS_SHORT = bilingual(
+  ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'İyn', 'İyl', 'Avq', 'Sen', 'Okt', 'Noy', 'Dek'],
+  ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+);
+/** month names in running text: lower-case in Azerbaijani ("22 oktyabr"), capitalised in English ("22 October") */
+export const monthInText = (i) => tr(MONTHS[i].toLowerCase(), MONTHS[i]);
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -36,10 +50,10 @@ export function weekDiff(weekStart) {
 
 export function weekLabel(weekStart) {
   const n = weekDiff(weekStart);
-  if (n === 0) return 'Bu həftə';
-  if (n === 1) return 'Gələn həftə';
-  if (n === -1) return 'Keçən həftə';
-  return n > 0 ? `${n} həftə sonra` : `${-n} həftə əvvəl`;
+  if (n === 0) return tr('Bu həftə', 'This week');
+  if (n === 1) return tr('Gələn həftə', 'Next week');
+  if (n === -1) return tr('Keçən həftə', 'Last week');
+  return n > 0 ? tr(`${n} həftə sonra`, `In ${n} weeks`) : tr(`${-n} həftə əvvəl`, `${-n} weeks ago`);
 }
 
 export function formatRange(weekStart) {
@@ -57,12 +71,28 @@ export function formatDay(key) {
 
 export function relativeDayLabel(key) {
   const t = todayKey();
-  if (key === t) return 'Bu gün';
-  if (key === toKey(addDays(new Date(), -1))) return 'Dünən';
-  if (key === toKey(addDays(new Date(), 1))) return 'Sabah';
+  if (key === t) return tr('Bu gün', 'Today');
+  if (key === toKey(addDays(new Date(), -1))) return tr('Dünən', 'Yesterday');
+  if (key === toKey(addDays(new Date(), 1))) return tr('Sabah', 'Tomorrow');
   const d = fromKey(key);
   const year = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : '';
   return `${DAYS[weekdayIndex(d)]}, ${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
+}
+
+// ---------- deadlines & reminders: stored as ISO instants, edited as local "YYYY-MM-DDTHH:mm" ----------
+export const toLocalInput = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${toKey(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+export const fromLocalInput = (v) => (v ? new Date(v).toISOString() : null);
+
+/** "23 Oct, 18:00" — with Today / Tomorrow for the nearest days */
+export function formatInstant(iso) {
+  const d = new Date(iso);
+  const k = toKey(d);
+  const day = k === todayKey() ? tr('Bu gün', 'Today') : k === toKey(addDays(new Date(), 1)) ? tr('Sabah', 'Tomorrow') : `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  return `${day}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** local calendar day on which a task was completed */

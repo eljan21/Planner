@@ -13,6 +13,8 @@ services:
         generateValue: true
       - key: GOOGLE_CLIENT_ID
         sync: false          # asked for in the Render dashboard
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false          # from @BotFather — enables deadline reminders in Telegram
       - key: ALLOWED_EMAILS
         sync: false          # e.g. dostun@gmail.com — leave empty to allow any Gmail
       - key: ALLOW_DEMO_LOGIN

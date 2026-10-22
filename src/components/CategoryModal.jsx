@@ -3,6 +3,7 @@ import { api } from '../api';
 import { PALETTE } from '../categories';
 import { todayKey } from '../dates';
 import Folder from './Folder';
+import { tr } from '../i18n';
 
 const EMOJIS = [
   '🏠', '💼', '💪', '🏋️', '🧘', '🍎', '🛒', '💰', '📚', '🎓', '✍️', '💻',
@@ -41,25 +42,25 @@ export default function CategoryModal({ category, taskCount, isLast, onClose, on
 
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal cat-modal" role="dialog" aria-modal="true" aria-label={isNew ? 'Yeni kateqoriya' : 'Kateqoriyanı redaktə et'}>
+      <div className="modal cat-modal" role="dialog" aria-modal="true" aria-label={isNew ? tr('Yeni kateqoriya', 'New category') : tr('Kateqoriyanı redaktə et', 'Edit category')}>
         {confirming ? (
           <div className="danger-zone">
             <div className="danger-icon">!</div>
-            <h2>«{category.name}» silinsin?</h2>
+            <h2>{tr(`«${category.name}» silinsin?`, `Delete “${category.name}”?`)}</h2>
             <p>
-              Bu kateqoriyanın içində artıq <b>{taskCount} tapşırıq</b> var. Kateqoriyanı silsəniz, bu
-              tapşırıqlar da (tamamlananlar daxil) <b>birdəfəlik silinəcək</b>. Əminsiniz?
+              {tr('Bu kateqoriyanın içində artıq', 'This category still has')} <b>{taskCount} {tr('tapşırıq', taskCount === 1 ? 'task' : 'tasks')}</b>{tr(' var. Kateqoriyanı silsəniz, bu tapşırıqlar da (tamamlananlar daxil) ', '. If you delete it, those tasks (done ones included) ')}
+              <b>{tr('birdəfəlik silinəcək', 'will be deleted for good')}</b>. {tr('Əminsiniz?', 'Are you sure?')}
             </p>
             <div className="recommend">
-              <span>💡 Silməzdən əvvəl məlumatları Excel-ə yükləməyiniz tövsiyə olunur.</span>
+              <span>💡 {tr('Silməzdən əvvəl məlumatları Excel-ə yükləməyiniz tövsiyə olunur.', 'We recommend downloading the data to Excel before deleting.')}</span>
               <a className="btn sm" href={excelHref} download onClick={() => setDownloaded(true)}>
-                ⬇ {downloaded ? 'Yükləndi ✓' : 'Excel-ə yüklə'}
+                ⬇ {downloaded ? tr('Yükləndi ✓', 'Downloaded ✓') : tr('Excel-ə yüklə', 'Download Excel')}
               </a>
             </div>
             <footer className="modal-foot">
-              <button className="btn" onClick={() => setConfirming(false)}>Ləğv et</button>
+              <button className="btn" onClick={() => setConfirming(false)}>{tr('Ləğv et', 'Cancel')}</button>
               <span className="spacer" />
-              <button className="btn danger-solid" onClick={onDelete}>Bəli, hamısını sil</button>
+              <button className="btn danger-solid" onClick={onDelete}>{tr('Bəli, hamısını sil', 'Yes, delete everything')}</button>
             </footer>
           </div>
         ) : (
@@ -67,24 +68,24 @@ export default function CategoryModal({ category, taskCount, isLast, onClose, on
             <div className="cat-preview">
               <Folder color={color} name={name || '?'} emoji={emoji} size={72} />
               <div>
-                <h2>{isNew ? 'Yeni kateqoriya' : 'Kateqoriya'}</h2>
-                {!isNew && <span className="muted small">{taskCount} tapşırıq</span>}
+                <h2>{isNew ? tr('Yeni kateqoriya', 'New category') : tr('Kateqoriya', 'Category')}</h2>
+                {!isNew && <span className="muted small">{taskCount} {tr('tapşırıq', taskCount === 1 ? 'task' : 'tasks')}</span>}
               </div>
             </div>
             <div className="field">
-              <label htmlFor="cat-name">Ad</label>
+              <label htmlFor="cat-name">{tr('Ad', 'Name')}</label>
               <input
                 id="cat-name"
                 autoFocus
                 maxLength={40}
-                placeholder="məs. İdman, Ailə, Layihə…"
+                placeholder={tr('məs. İdman, Ailə, Layihə…', 'e.g. Sport, Family, Project…')}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
               />
             </div>
             <div className="field">
-              <label>Rəng</label>
+              <label>{tr('Rəng', 'Colour')}</label>
               <div className="palette">
                 {PALETTE.map((p) => (
                   <button
@@ -99,9 +100,9 @@ export default function CategoryModal({ category, taskCount, isLast, onClose, on
               </div>
             </div>
             <div className="field">
-              <label>İkon (emoji)</label>
+              <label>{tr('İkon (emoji)', 'Icon (emoji)')}</label>
               <div className="emoji-grid">
-                <button type="button" className={`emoji-opt none${!emoji ? ' sel' : ''}`} onClick={() => setEmoji('')} title="İkonsuz">Aa</button>
+                <button type="button" className={`emoji-opt none${!emoji ? ' sel' : ''}`} onClick={() => setEmoji('')} title={tr('İkonsuz', 'No icon')}>Aa</button>
                 {EMOJIS.map((e) => (
                   <button key={e} type="button" className={`emoji-opt${emoji === e ? ' sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
                 ))}
@@ -113,15 +114,15 @@ export default function CategoryModal({ category, taskCount, isLast, onClose, on
                   className="btn ghost danger"
                   onClick={askDelete}
                   disabled={isLast}
-                  title={isLast ? 'Ən azı bir kateqoriya qalmalıdır' : 'Kateqoriyanı sil'}
+                  title={isLast ? tr('Ən azı bir kateqoriya qalmalıdır', 'At least one category has to stay') : tr('Kateqoriyanı sil', 'Delete category')}
                 >
-                  Sil
+                  {tr('Sil', 'Delete')}
                 </button>
               )}
               <span className="spacer" />
-              <button className="btn" onClick={onClose}>Ləğv et</button>
+              <button className="btn" onClick={onClose}>{tr('Ləğv et', 'Cancel')}</button>
               <button className="btn primary" onClick={save} disabled={!name.trim()}>
-                {isNew ? 'Yarat' : 'Yadda saxla'}
+                {isNew ? tr('Yarat', 'Create') : tr('Yadda saxla', 'Save')}
               </button>
             </footer>
           </>
